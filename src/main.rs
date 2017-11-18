@@ -34,13 +34,17 @@ fn main() {
 
     println!("With text length: {}", contents.len());
 
-    let foo = contents.split("\n").into_iter().map(|line| println!("line is {}\n", line));
-
-    println!("foo is {:?}", foo);
+    let real_json: Vec<String> = contents.split("\n").into_iter().map(|line| format!("{}", line)).collect();
 
     // parse it
-    // let deserialized: Event = serde_json::from_str(&contents).expect("Couldn't deserialize event file.");
+    let mut events: Vec<Event> = Vec::new();
+    for serialized_event in &real_json {
+        if serialized_event.len() > 0 {
+            events.push(serde_json::from_str(&serialized_event).expect("Couldn't deserialize event file."))
+        }
+    }
 
     // display something interesting
-    // println!("deserialized is {:?}", deserialized);
+    println!("\nFound {} events", events.len());
+    println!("\nevents first item is {:?}", events.first());
 }
