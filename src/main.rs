@@ -25,7 +25,31 @@ fn main() {
     println!("Welcome to Rusty von Humboldt.");
 
     // In the future we'd have the list of files
-    let file_list = vec!["../2017-01-01-15.json", "../2017-05-01-15.json", "../2017-10-01-15.json"];
+    let file_list = vec!["../2017-05-01-0.json",
+                         "../2017-05-01-1.json",
+                         "../2017-05-01-2.json",
+                         "../2017-05-01-3.json",
+                         "../2017-05-01-4.json",
+                         "../2017-05-01-5.json",
+                         "../2017-05-01-6.json",
+                         "../2017-05-01-7.json",
+                         "../2017-05-01-8.json",
+                         "../2017-05-01-9.json",
+                         "../2017-05-01-10.json",
+                         "../2017-05-01-11.json",
+                         "../2017-05-01-12.json",
+                         "../2017-05-01-13.json",
+                         "../2017-05-01-14.json",
+                         "../2017-05-01-15.json",
+                         "../2017-05-01-16.json",
+                         "../2017-05-01-17.json",
+                         "../2017-05-01-18.json",
+                         "../2017-05-01-19.json",
+                         "../2017-05-01-20.json",
+                         "../2017-05-01-21.json",
+                         "../2017-05-01-22.json",
+                         "../2017-05-01-23.json",
+                         ];
     // parse_ze_file does file IO which is an antipattern with rayon.
     // Should figure out a way to read things in with a threadpool perhaps.
     let events: Vec<Event> = file_list
