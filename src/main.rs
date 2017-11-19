@@ -1,6 +1,6 @@
+extern crate rusty_von_humboldt;
+
 extern crate clap;
-#[macro_use]
-extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 extern crate rayon;
@@ -13,26 +13,7 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use rayon::prelude::*;
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Actor {
-    id: i64,
-    display_login: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Repo {
-    id: i64,
-    name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Event {
-    id: String,
-    #[serde(rename = "type")]
-    event_type: String,
-    actor: Actor,
-    repo: Repo,
-}
+use rusty_von_humboldt::*;
 
 fn main() {
     let _ = App::new("Rusty von Humboldt")
