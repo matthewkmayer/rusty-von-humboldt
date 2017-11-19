@@ -16,6 +16,7 @@ use rayon::prelude::*;
 use rusty_von_humboldt::*;
 
 fn main() {
+    let mut sw = Stopwatch::start_new();
     let _ = App::new("Rusty von Humboldt")
                           .version("0.1.0")
                           .author("Matthew Mayer <matthewkmayer@gmail.com>")
@@ -57,17 +58,18 @@ fn main() {
         .flat_map(|file_name| parse_ze_file(file_name).expect("Issue with file ingest"))
         .collect();
 
+    println!("\nGetting events took {}ms\n", sw.elapsed_ms());
+    
     // display something interesting
     println!("\nFound {} events", events.len());
-    println!("\nevents first item is {:?}", events.first().expect("Should have an item in the events list"));
-    // breakdown_event_type(&events);
-    // unique_actors_found(&events);
-    // unique_repos_found(&events);
 
+    sw.restart();
     print_committers_per_repo(events);
+    println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
-// TODO: find only accepted PRs
+// TODO: find only accepted PRs.  It's under payload => action in the JSON.
+// TODO: commits directly on the repo count, too.  That's the "PushEvent" type.
 fn print_committers_per_repo(events: Vec<Event>) {
     let mut sw = Stopwatch::start_new();
     let pr_events: Vec<Event> = events
@@ -104,46 +106,6 @@ fn print_committers_per_repo(events: Vec<Event>) {
     sw.restart();
 
     // println!("\n repo_actors_count: {:?}", repo_actors_count);
-}
-
-fn unique_actors_found(events: &[Event]) {
-    use std::collections::BTreeMap;
-    let mut actors = BTreeMap::new();
-    for event in events {
-        if !actors.contains_key(&event.actor.id) {
-            actors.insert(event.actor.id.clone(), ());
-        }
-    }
-
-    println!("\nUnique actors found: {}\n", actors.len());
-}
-
-fn unique_repos_found(events: &[Event]) {
-    use std::collections::BTreeMap;
-    let mut repos = BTreeMap::new();
-    for event in events {
-        if !repos.contains_key(&event.repo.id) {
-            repos.insert(event.repo.id.clone(), ());
-        }
-    }
-
-    println!("\nUnique repos found: {}\n", repos.len());
-}
-
-fn breakdown_event_type(events: &[Event]) {
-    use std::collections::BTreeMap;
-    let mut event_types = BTreeMap::new();
-    for event in events {
-        if !event_types.contains_key(&event.event_type) {
-            event_types.insert(event.event_type.clone(), ());
-        }
-    }
-
-    println!("\nEvents found:");
-
-    for (event_found, _) in event_types {
-        println!("{}", event_found);
-    }
 }
 
 fn parse_ze_file(file_location: &str) -> Result<Vec<Event>, String> {
