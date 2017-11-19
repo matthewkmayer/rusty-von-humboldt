@@ -24,11 +24,26 @@ fn main() {
 
     println!("Welcome to Rusty von Humboldt.");
 
-    // TODO: extract this work to a function so we can do parallel iteration over a list of input files:
+    let mut events = Vec::new();
 
-    // Hardcoded path to a github archive file for now
-    let sample_file = "../2017-01-01-15.json";
-    let f = File::open(sample_file).expect("file not found");
+    // In the future we'd have the list of files somewhere (json file?) and we'd par_iter over those
+    match parse_ze_file("../2017-01-01-15.json") {
+        Ok(events_found) => events.extend(events_found),
+        Err(e) => println!("Error parsing file: {:?}", e),
+    }
+
+    match parse_ze_file("../2017-05-01-15.json") {
+        Ok(events_found) => events.extend(events_found),
+        Err(e) => println!("Error parsing file: {:?}", e),
+    }
+
+    // display something interesting
+    println!("\nFound {} events", events.len());
+    println!("\nevents first item is {:?}", events.first());
+}
+
+fn parse_ze_file(file_location: &str) -> Result<Vec<Event>, String> {
+    let f = File::open(file_location).expect("file not found");
 
     let mut sw = Stopwatch::start_new();
     // temp_stringy only present since I can't get a par_iter directly from .split()
@@ -48,8 +63,5 @@ fn main() {
         .collect();
 
     println!("Deserialization took {}ms", sw.elapsed_ms());
-
-    // display something interesting
-    println!("\nFound {} events", events.len());
-    println!("\nevents first item is {:?}", events.first());
+    Ok(events)
 }
