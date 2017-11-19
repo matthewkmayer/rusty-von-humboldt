@@ -28,6 +28,7 @@ struct Event {
     #[serde(rename = "type")]
     event_type: String,
     actor: Actor,
+    repo: Repo,
 }
 
 fn main() {
