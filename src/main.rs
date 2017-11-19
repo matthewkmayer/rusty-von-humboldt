@@ -101,29 +101,19 @@ fn print_committers_per_repo(events: Vec<Event>) {
     println!("Tying repos to actors took {}ms", sw.elapsed_ms());
     sw.restart();
 
-    println!("\n repo_actors_count: {:?}", repo_actors_count);
+    // println!("\n repo_actors_count: {:?}", repo_actors_count);
 }
 
 fn parse_ze_file(file_location: &str) -> Result<Vec<Event>, String> {
     let f = File::open(file_location).expect("file not found");
 
-    let mut sw = Stopwatch::start_new();
-    // temp_stringy only present since I can't get a par_iter directly from .split()
-    let mut temp_stringy: Vec<String> = Vec::with_capacity(25000);
-    for line in BufReader::new(f).lines() {
-        match line {
-            Ok(l) => temp_stringy.push(l),
-            Err(_) => (),
-        }
-    }
-    println!("file reading fun took {}ms", sw.elapsed_ms());
-
-    sw.restart();
-    let events: Vec<Event> = temp_stringy
-        .par_iter()
-        .map(|l| serde_json::from_str(&l).expect("Couldn't deserialize event file."))
+    let sw = Stopwatch::start_new();
+    let events: Vec<Event> = BufReader::new(f)
+        .lines()
+        .map(|l| serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file."))
         .collect();
 
-    println!("Deserialization took {}ms", sw.elapsed_ms());
+    println!("file reading and deserialization took {}ms", sw.elapsed_ms());
+
     Ok(events)
 }
