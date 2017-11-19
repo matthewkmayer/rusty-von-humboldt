@@ -24,18 +24,14 @@ fn main() {
 
     println!("Welcome to Rusty von Humboldt.");
 
-    let mut events = Vec::new();
-
-    // In the future we'd have the list of files somewhere (json file?) and we'd par_iter over those
-    match parse_ze_file("../2017-01-01-15.json") {
-        Ok(events_found) => events.extend(events_found),
-        Err(e) => println!("Error parsing file: {:?}", e),
-    }
-
-    match parse_ze_file("../2017-05-01-15.json") {
-        Ok(events_found) => events.extend(events_found),
-        Err(e) => println!("Error parsing file: {:?}", e),
-    }
+    // In the future we'd have the list of files
+    let file_list = vec!["../2017-01-01-15.json", "../2017-05-01-15.json", "../2017-10-01-15.json"];
+    // parse_ze_file does file IO which is an antipattern with rayon.
+    // Should figure out a way to read things in with a threadpool perhaps.
+    let events: Vec<Event> = file_list
+        .par_iter()
+        .flat_map(|file_name| parse_ze_file(file_name).expect("Issue with file ingest"))
+        .collect();
 
     // display something interesting
     println!("\nFound {} events", events.len());
