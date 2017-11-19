@@ -11,10 +11,23 @@ use std::io::prelude::*;
 use rayon::prelude::*;
 
 #[derive(Serialize, Deserialize, Debug)]
+struct Actor {
+    id: i64,
+    display_login: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Repo {
+    id: i64,
+    name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct Event {
     id: String,
     #[serde(rename = "type")]
     event_type: String,
+    actor: Actor,
 }
 
 fn main() {
