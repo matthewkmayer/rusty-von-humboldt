@@ -36,12 +36,14 @@ struct Event {
 
 fn main() {
     let _ = App::new("Rusty von Humboldt")
-                          .version("0.0.1")
+                          .version("0.1.0")
                           .author("Matthew Mayer <matthewkmayer@gmail.com>")
                           .about("Explore GitHub Archive data")
                           .get_matches();
 
     println!("Welcome to Rusty von Humboldt.");
+
+    // TODO: extract this work to a function so we can do parallel iteration over a list of input files:
 
     // Hardcoded path to a github archive file for now
     let sample_file = "../2017-01-01-15.json";
