@@ -60,9 +60,44 @@ fn main() {
     // display something interesting
     println!("\nFound {} events", events.len());
     println!("\nevents first item is {:?}", events.first().expect("Should have an item in the events list"));
-    breakdown_event_type(&events);
-    unique_actors_found(&events);
-    unique_repos_found(&events);
+    // breakdown_event_type(&events);
+    // unique_actors_found(&events);
+    // unique_repos_found(&events);
+
+    print_committers_per_repo(events);
+}
+
+// TODO: find only accepted PRs
+fn print_committers_per_repo(events: Vec<Event>) {
+    let pr_events: Vec<Event> = events
+        .into_iter()
+        .filter(|event| event.event_type == "PullRequestEvent")
+        .collect();
+
+    let mut pr_by_actors: Vec<Pr_by_actor> = Vec::new();
+
+    for event in pr_events {
+        let tmp_pr_by_actor = Pr_by_actor {
+            repo_id: event.repo.id,
+            actor: event.actor,
+        };
+        if !pr_by_actors.contains(&tmp_pr_by_actor) {
+            pr_by_actors.push(tmp_pr_by_actor.clone());
+        }
+    }
+
+    // for each repo, count PRs made to it
+    use std::collections::BTreeMap;
+    let mut repo_actors_count = BTreeMap::new();
+    for pr in pr_by_actors {
+        // Clone to bypass borrow checker for the moment
+        match repo_actors_count.clone().get(&pr.repo_id) {
+            Some(existing_count) => repo_actors_count.insert(pr.repo_id.clone(), existing_count+1),
+            None => repo_actors_count.insert(pr.repo_id.clone(), 1),
+        };
+    }
+
+    println!("\n repo_actors_count: {:?}", repo_actors_count);
 }
 
 fn unique_actors_found(events: &[Event]) {
