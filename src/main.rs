@@ -69,16 +69,20 @@ fn main() {
 
 // TODO: find only accepted PRs
 fn print_committers_per_repo(events: Vec<Event>) {
+    let mut sw = Stopwatch::start_new();
     let pr_events: Vec<Event> = events
         .into_iter()
         .filter(|event| event.event_type == "PullRequestEvent")
         .collect();
 
+    println!("finding PR events took {}ms", sw.elapsed_ms());
+    sw.restart();
+
     let mut pr_by_actors: Vec<Pr_by_actor> = Vec::new();
 
     for event in pr_events {
         let tmp_pr_by_actor = Pr_by_actor {
-            repo_id: event.repo.id,
+            repo: event.repo,
             actor: event.actor,
         };
         if !pr_by_actors.contains(&tmp_pr_by_actor) {
@@ -86,16 +90,17 @@ fn print_committers_per_repo(events: Vec<Event>) {
         }
     }
 
+    println!("Combining PRs and actors took {}ms", sw.elapsed_ms());
+    sw.restart();
+
     // for each repo, count PRs made to it
     use std::collections::BTreeMap;
-    let mut repo_actors_count = BTreeMap::new();
+    let mut repo_actors_count: BTreeMap<Repo, i32> = BTreeMap::new();
     for pr in pr_by_actors {
-        // Clone to bypass borrow checker for the moment
-        match repo_actors_count.clone().get(&pr.repo_id) {
-            Some(existing_count) => repo_actors_count.insert(pr.repo_id.clone(), existing_count+1),
-            None => repo_actors_count.insert(pr.repo_id.clone(), 1),
-        };
+        *repo_actors_count.entry(pr.repo).or_insert(0) += 1;
     }
+    println!("Tying repos to actors took {}ms", sw.elapsed_ms());
+    sw.restart();
 
     println!("\n repo_actors_count: {:?}", repo_actors_count);
 }
