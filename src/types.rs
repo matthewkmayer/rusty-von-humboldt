@@ -1,20 +1,20 @@
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Actor {
-    id: i64,
-    display_login: String,
+    pub id: i64,
+    pub display_login: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Repo {
-    id: i64,
-    name: String,
+    pub id: i64,
+    pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Event {
-    id: String,
+    pub id: String,
     #[serde(rename = "type")]
-    event_type: String,
-    actor: Actor,
-    repo: Repo,
+    pub event_type: String,
+    pub actor: Actor,
+    pub repo: Repo,
 }

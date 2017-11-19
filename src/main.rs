@@ -59,7 +59,50 @@ fn main() {
 
     // display something interesting
     println!("\nFound {} events", events.len());
-    println!("\nevents first item is {:?}", events.first());
+    println!("\nevents first item is {:?}", events.first().expect("Should have an item in the events list"));
+    breakdown_event_type(&events);
+    unique_actors_found(&events);
+    unique_repos_found(&events);
+}
+
+fn unique_actors_found(events: &[Event]) {
+    use std::collections::BTreeMap;
+    let mut actors = BTreeMap::new();
+    for event in events {
+        if !actors.contains_key(&event.actor.id) {
+            actors.insert(event.actor.id.clone(), ());
+        }
+    }
+
+    println!("\nUnique actors found: {}\n", actors.len());
+}
+
+fn unique_repos_found(events: &[Event]) {
+    use std::collections::BTreeMap;
+    let mut repos = BTreeMap::new();
+    for event in events {
+        if !repos.contains_key(&event.repo.id) {
+            repos.insert(event.repo.id.clone(), ());
+        }
+    }
+
+    println!("\nUnique repos found: {}\n", repos.len());
+}
+
+fn breakdown_event_type(events: &[Event]) {
+    use std::collections::BTreeMap;
+    let mut event_types = BTreeMap::new();
+    for event in events {
+        if !event_types.contains_key(&event.event_type) {
+            event_types.insert(event.event_type.clone(), ());
+        }
+    }
+
+    println!("\nEvents found:");
+
+    for (event_found, _) in event_types {
+        println!("{}", event_found);
+    }
 }
 
 fn parse_ze_file(file_location: &str) -> Result<Vec<Event>, String> {
