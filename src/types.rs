@@ -1,4 +1,4 @@
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     pub id: i64,
     pub display_login: String,
@@ -19,7 +19,7 @@ pub struct Event {
     pub repo: Repo,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Pr_by_actor {
     pub repo: Repo,
     pub actor: Actor,
