@@ -68,7 +68,6 @@ fn main() {
     println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
-// TODO: find only accepted PRs.  It's under payload => action in the JSON.
 // TODO: commits directly on the repo count, too.  That's the "PushEvent" type.
 fn print_committers_per_repo(events: Vec<Event>) {
     let mut sw = Stopwatch::start_new();
@@ -81,21 +80,38 @@ fn print_committers_per_repo(events: Vec<Event>) {
     sw.restart();
 
     // naive dumping data into a vec then sort+dedup is faster than checking in each iteration
-    let mut pr_by_actors: Vec<Pr_by_actor> = pr_events
+    let mut accepted_pr_by_actors: Vec<PrByActor> = pr_events
         .par_iter()
-        .map(|event| Pr_by_actor { repo: event.repo.clone(), actor: event.actor.clone(), } )
+        // Only count accepted PRs:
+        .filter(|event| {
+            // lol so chunky, refactor to function?
+            match event.payload {
+                Some(ref payload) => match payload.pull_request {
+                    Some(ref pr) => match pr.merged {
+                        Some(merged) => merged,
+                        None => false,
+                    },
+                    None => false,
+                },
+                None => false,
+            }
+        })
+        .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
         .collect();
 
-    pr_by_actors.sort();
-    pr_by_actors.dedup();
+    accepted_pr_by_actors.sort();
+    accepted_pr_by_actors.dedup();
+
+    // Now iterate through events list to find folks pushing directly to repo.
+    // Add to accepted_pr_by_actors then rename that to commits_accepted_with_repo or similar.
 
     println!("Combining PRs and actors took {}ms", sw.elapsed_ms());
     sw.restart();
 
-    // for each repo, count PRs made to it
+    // for each repo, count accepted PRs made to it
     use std::collections::BTreeMap;
     let mut repo_actors_count: BTreeMap<Repo, i32> = BTreeMap::new();
-    for pr in pr_by_actors {
+    for pr in accepted_pr_by_actors {
         *repo_actors_count.entry(pr.repo).or_insert(0) += 1;
     }
     println!("Tying repos to actors took {}ms", sw.elapsed_ms());
