@@ -80,16 +80,12 @@ fn print_committers_per_repo(events: Vec<Event>) {
     println!("finding PR events took {}ms", sw.elapsed_ms());
     sw.restart();
 
-    let mut pr_by_actors: Vec<Pr_by_actor> = Vec::new();
-
     // naive dumping data into a vec then sort+dedup is faster than checking in each iteration
-    for event in pr_events {
-        let tmp_pr_by_actor = Pr_by_actor {
-            repo: event.repo,
-            actor: event.actor,
-        };
-        pr_by_actors.push(tmp_pr_by_actor);
-    }
+    let mut pr_by_actors: Vec<Pr_by_actor> = pr_events
+        .par_iter()
+        .map(|event| Pr_by_actor { repo: event.repo.clone(), actor: event.actor.clone(), } )
+        .collect();
+
     pr_by_actors.sort();
     pr_by_actors.dedup();
 
@@ -105,7 +101,7 @@ fn print_committers_per_repo(events: Vec<Event>) {
     println!("Tying repos to actors took {}ms", sw.elapsed_ms());
     sw.restart();
 
-    // println!("\n repo_actors_count: {:?}", repo_actors_count);
+    println!("\n repo_actors_count: {:?}", repo_actors_count);
 }
 
 fn parse_ze_file(file_location: &str) -> Result<Vec<Event>, String> {
