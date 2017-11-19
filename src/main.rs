@@ -3,10 +3,12 @@ extern crate clap;
 extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
+extern crate rayon;
 
 use clap::App;
 use std::fs::File;
 use std::io::prelude::*;
+use rayon::prelude::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Event {
@@ -32,17 +34,18 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    println!("With text length: {}", contents.len());
-
-    let real_json: Vec<String> = contents.split("\n").into_iter().map(|line| format!("{}", line)).collect();
-
-    // parse it
-    let mut events: Vec<Event> = Vec::new();
-    for serialized_event in &real_json {
-        if serialized_event.len() > 0 {
-            events.push(serde_json::from_str(&serialized_event).expect("Couldn't deserialize event file."))
+    // temp_stringy only present since I can't get a par_iter directly from .split()
+    let mut temp_stringy = Vec::with_capacity(25000);
+    for line in contents.split("\n") {
+        if line.len() > 0 {
+            temp_stringy.push(line);
         }
     }
+
+    let events: Vec<Event> = temp_stringy
+        .par_iter()
+        .map(|l| serde_json::from_str(&l).expect("Couldn't deserialize event file."))
+        .collect();
 
     // display something interesting
     println!("\nFound {} events", events.len());
