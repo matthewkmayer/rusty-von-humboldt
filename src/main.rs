@@ -16,6 +16,7 @@ use rayon::prelude::*;
 use rusty_von_humboldt::*;
 
 fn main() {
+    let mut sw = Stopwatch::start_new();
     let _ = App::new("Rusty von Humboldt")
                           .version("0.1.0")
                           .author("Matthew Mayer <matthewkmayer@gmail.com>")
@@ -57,74 +58,78 @@ fn main() {
         .flat_map(|file_name| parse_ze_file(file_name).expect("Issue with file ingest"))
         .collect();
 
+    println!("\nGetting events took {}ms\n", sw.elapsed_ms());
+    
     // display something interesting
     println!("\nFound {} events", events.len());
-    println!("\nevents first item is {:?}", events.first().expect("Should have an item in the events list"));
-    breakdown_event_type(&events);
-    unique_actors_found(&events);
-    unique_repos_found(&events);
+
+    sw.restart();
+    print_committers_per_repo(events);
+    println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
-fn unique_actors_found(events: &[Event]) {
+// TODO: commits directly on the repo count, too.  That's the "PushEvent" type.
+fn print_committers_per_repo(events: Vec<Event>) {
+    let mut sw = Stopwatch::start_new();
+    let pr_events: Vec<Event> = events
+        .into_par_iter()
+        .filter(|event| event.event_type == "PullRequestEvent")
+        .collect();
+
+    println!("finding PR events took {}ms", sw.elapsed_ms());
+    sw.restart();
+
+    // naive dumping data into a vec then sort+dedup is faster than checking in each iteration
+    let mut accepted_pr_by_actors: Vec<PrByActor> = pr_events
+        .par_iter()
+        // Only count accepted PRs:
+        .filter(|event| {
+            // lol so chunky, refactor to function?
+            match event.payload {
+                Some(ref payload) => match payload.pull_request {
+                    Some(ref pr) => match pr.merged {
+                        Some(merged) => merged,
+                        None => false,
+                    },
+                    None => false,
+                },
+                None => false,
+            }
+        })
+        .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
+        .collect();
+
+    accepted_pr_by_actors.sort();
+    accepted_pr_by_actors.dedup();
+
+    // Now iterate through events list to find folks pushing directly to repo.
+    // Add to accepted_pr_by_actors then rename that to commits_accepted_with_repo or similar.
+
+    println!("Combining PRs and actors took {}ms", sw.elapsed_ms());
+    sw.restart();
+
+    // for each repo, count accepted PRs made to it
     use std::collections::BTreeMap;
-    let mut actors = BTreeMap::new();
-    for event in events {
-        if !actors.contains_key(&event.actor.id) {
-            actors.insert(event.actor.id.clone(), ());
-        }
+    let mut repo_actors_count: BTreeMap<Repo, i32> = BTreeMap::new();
+    for pr in accepted_pr_by_actors {
+        *repo_actors_count.entry(pr.repo).or_insert(0) += 1;
     }
+    println!("Tying repos to actors took {}ms", sw.elapsed_ms());
+    sw.restart();
 
-    println!("\nUnique actors found: {}\n", actors.len());
-}
-
-fn unique_repos_found(events: &[Event]) {
-    use std::collections::BTreeMap;
-    let mut repos = BTreeMap::new();
-    for event in events {
-        if !repos.contains_key(&event.repo.id) {
-            repos.insert(event.repo.id.clone(), ());
-        }
-    }
-
-    println!("\nUnique repos found: {}\n", repos.len());
-}
-
-fn breakdown_event_type(events: &[Event]) {
-    use std::collections::BTreeMap;
-    let mut event_types = BTreeMap::new();
-    for event in events {
-        if !event_types.contains_key(&event.event_type) {
-            event_types.insert(event.event_type.clone(), ());
-        }
-    }
-
-    println!("\nEvents found:");
-
-    for (event_found, _) in event_types {
-        println!("{}", event_found);
-    }
+    // println!("\n repo_actors_count: {:?}", repo_actors_count);
 }
 
 fn parse_ze_file(file_location: &str) -> Result<Vec<Event>, String> {
     let f = File::open(file_location).expect("file not found");
 
-    let mut sw = Stopwatch::start_new();
-    // temp_stringy only present since I can't get a par_iter directly from .split()
-    let mut temp_stringy: Vec<String> = Vec::with_capacity(25000);
-    for line in BufReader::new(f).lines() {
-        match line {
-            Ok(l) => temp_stringy.push(l),
-            Err(_) => (),
-        }
-    }
-    println!("file reading fun took {}ms", sw.elapsed_ms());
-
-    sw.restart();
-    let events: Vec<Event> = temp_stringy
-        .par_iter()
-        .map(|l| serde_json::from_str(&l).expect("Couldn't deserialize event file."))
+    let sw = Stopwatch::start_new();
+    let events: Vec<Event> = BufReader::new(f)
+        .lines()
+        .map(|l| serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file."))
         .collect();
 
-    println!("Deserialization took {}ms", sw.elapsed_ms());
+    println!("file reading and deserialization took {}ms", sw.elapsed_ms());
+
     Ok(events)
 }
