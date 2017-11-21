@@ -9,6 +9,7 @@ use stopwatch::Stopwatch;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
+use std::collections::BTreeMap;
 use rayon::prelude::*;
 
 use rusty_von_humboldt::*;
@@ -62,6 +63,11 @@ fn main() {
     println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
+// What's the most recent name for repo by github ID repo_id?
+fn latest_name_for_repo_id(repo_id: i64) -> String {
+    return "placeholder".to_string();
+}
+
 fn print_committers_per_repo(events: Vec<Event>) {
     let mut sw = Stopwatch::start_new();
     let pr_events: Vec<Event> = events
@@ -89,19 +95,24 @@ fn print_committers_per_repo(events: Vec<Event>) {
     println!("Combining PRs and actors took {}ms", sw.elapsed_ms());
     sw.restart();
 
-    // for each repo, count accepted PRs made to it
-    // TODO: this may not correctly correlate renamed repos.
-    // Switch to using the repoID instead of repo object, then do another pass
-    // to tie the repo ID to the current name of the repo.
-    use std::collections::BTreeMap;
-    let mut repo_actors_count: BTreeMap<Repo, i32> = BTreeMap::new();
-    for pr in commits_accepted_to_repo {
-        *repo_actors_count.entry(pr.repo).or_insert(0) += 1;
-    }
+    display_actor_count_per_repo(&commits_accepted_to_repo);
     println!("Tying repos to actors took {}ms", sw.elapsed_ms());
-    sw.restart();
+}
 
-    println!("\n repo_actors_count: {:#?}", repo_actors_count);
+fn display_actor_count_per_repo(commits_accepted_to_repo: &Vec<PrByActor>) {
+    // for each repo, count accepted PRs and direct commits made
+    let mut repo_actors_count: BTreeMap<i64, i32> = BTreeMap::new();
+    for pr in commits_accepted_to_repo {
+        *repo_actors_count.entry(pr.repo.id).or_insert(0) += 1;
+    }
+
+    // match repo ids to their current names:
+    let mut repo_name_and_actors: BTreeMap<Repo, i32>= BTreeMap::new();
+    for (repo_id, actor_count) in repo_actors_count {
+        repo_name_and_actors.insert(Repo {id: repo_id, name: latest_name_for_repo_id(repo_id)}, actor_count);
+    }
+
+    // println!("\nrepo_name_and_actors: {:#?}", repo_name_and_actors);
 }
 
 fn is_direct_push_event(event: &Event) -> bool {
