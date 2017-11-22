@@ -19,58 +19,69 @@ fn main() {
 
     println!("Welcome to Rusty von Humboldt.");
 
+
     // In the future we'd have the list of files from the authoritative location
     // such as an S3 bucket.
     let file_list = vec!["../2017-05-01-0.json",
                          "../2017-05-01-1.json",
                          "../2017-05-01-2.json",
-                        //  "../2017-05-01-3.json",
-                        //  "../2017-05-01-4.json",
-                        //  "../2017-05-01-5.json",
-                        //  "../2017-05-01-6.json",
-                        //  "../2017-05-01-7.json",
-                        //  "../2017-05-01-8.json",
-                        //  "../2017-05-01-9.json",
-                        //  "../2017-05-01-10.json",
-                        //  "../2017-05-01-11.json",
-                        //  "../2017-05-01-12.json",
-                        //  "../2017-05-01-13.json",
-                        //  "../2017-05-01-14.json",
-                        //  "../2017-05-01-15.json",
-                        //  "../2017-05-01-16.json",
-                        //  "../2017-05-01-17.json",
-                        //  "../2017-05-01-18.json",
-                        //  "../2017-05-01-19.json",
-                        //  "../2017-05-01-20.json",
-                        //  "../2017-05-01-21.json",
-                        //  "../2017-05-01-22.json",
-                        //  "../2017-05-01-23.json",
+                         "../2017-05-01-3.json",
+                         "../2017-05-01-4.json",
+                         "../2017-05-01-5.json",
+                         "../2017-05-01-6.json",
+                         "../2017-05-01-7.json",
+                         "../2017-05-01-8.json",
+                         "../2017-05-01-9.json",
+                         "../2017-05-01-10.json",
+                         "../2017-05-01-11.json",
+                         "../2017-05-01-12.json",
+                         "../2017-05-01-13.json",
+                         "../2017-05-01-14.json",
+                         "../2017-05-01-15.json",
+                         "../2017-05-01-16.json",
+                         "../2017-05-01-17.json",
+                         "../2017-05-01-18.json",
+                         "../2017-05-01-19.json",
+                         "../2017-05-01-20.json",
+                         "../2017-05-01-21.json",
+                         "../2017-05-01-22.json",
+                         "../2017-05-01-23.json",
                          ];
     // parse_ze_file does file IO which is an antipattern with rayon.
     // Should figure out a way to read things in with a threadpool perhaps.
-    let events: Vec<Event> = file_list
+    let mut events: Vec<Event> = file_list
         .par_iter()
         .flat_map(|file_name| parse_ze_file(file_name).expect("Issue with file ingest"))
         .collect();
 
     println!("\nGetting events took {}ms\n", sw.elapsed_ms());
-    
-    // display something interesting
-    println!("\nFound {} events", events.len());
 
     sw.restart();
-    print_committers_per_repo(events);
+    // This function should be refactored to walk the events list once instead of a whole bunch:
+    let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
+    println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
+
+    sw.restart();
+    print_committers_per_repo(&events, &repo_id_name_map);
     println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
-// What's the most recent name for repo by github ID repo_id?
-fn latest_name_for_repo_id(repo_id: i64) -> String {
-    return "placeholder".to_string();
+// Assumes the github repo ID doesn't change but the name field can:
+fn calculate_up_to_date_name_for_repos(events: &mut Vec<Event>) -> BTreeMap<i64, String> {
+    // Don't assume it's ordered correctly from GHA:
+    events.sort_by_key(|ref k| (k.id_as_i64.expect("Should be populated is i64")));
+    let mut id_to_latest_repo_name: BTreeMap<i64, String> = BTreeMap::new();
+    for event in events {
+        id_to_latest_repo_name.
+            insert(event.repo.id, event.repo.name.to_string());
+    }
+
+    id_to_latest_repo_name
 }
 
-fn print_committers_per_repo(events: Vec<Event>) {
+fn print_committers_per_repo(events: &Vec<Event>, repo_id_name_map: &BTreeMap<i64, String>) {
     let mut sw = Stopwatch::start_new();
-    let pr_events: Vec<Event> = events
+    let pr_events: Vec<&Event> = events
         .into_par_iter()
         .filter(|event| event.event_type == "PullRequestEvent" || event.event_type == "PushEvent")
         .collect();
@@ -95,11 +106,11 @@ fn print_committers_per_repo(events: Vec<Event>) {
     println!("Combining PRs and actors took {}ms", sw.elapsed_ms());
     sw.restart();
 
-    display_actor_count_per_repo(&commits_accepted_to_repo);
+    display_actor_count_per_repo(&commits_accepted_to_repo, repo_id_name_map);
     println!("Tying repos to actors took {}ms", sw.elapsed_ms());
 }
 
-fn display_actor_count_per_repo(commits_accepted_to_repo: &Vec<PrByActor>) {
+fn display_actor_count_per_repo(commits_accepted_to_repo: &Vec<PrByActor>, repo_id_name_map: &BTreeMap<i64, String>) {
     // for each repo, count accepted PRs and direct commits made
     let mut repo_actors_count: BTreeMap<i64, i32> = BTreeMap::new();
     for pr in commits_accepted_to_repo {
@@ -109,7 +120,7 @@ fn display_actor_count_per_repo(commits_accepted_to_repo: &Vec<PrByActor>) {
     // match repo ids to their current names:
     let mut repo_name_and_actors: BTreeMap<Repo, i32>= BTreeMap::new();
     for (repo_id, actor_count) in repo_actors_count {
-        repo_name_and_actors.insert(Repo {id: repo_id, name: latest_name_for_repo_id(repo_id)}, actor_count);
+        repo_name_and_actors.insert(Repo {id: repo_id, name: repo_id_name_map.get(&repo_id).expect("repo name should be present").to_string()}, actor_count);
     }
 
     // println!("\nrepo_name_and_actors: {:#?}", repo_name_and_actors);
@@ -150,7 +161,11 @@ fn parse_ze_file(file_location: &str) -> Result<Vec<Event>, String> {
     let sw = Stopwatch::start_new();
     let events: Vec<Event> = BufReader::new(f)
         .lines()
-        .map(|l| serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file."))
+        .map(|l| {
+            let mut event: Event = serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file.");
+            event.id_as_i64 = Some(event.id.parse::<i64>().expect("github ID should be an i64"));
+            event
+        })
         .collect();
 
     println!("file reading and deserialization took {}ms", sw.elapsed_ms());
