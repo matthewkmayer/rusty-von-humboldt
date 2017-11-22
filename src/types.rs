@@ -16,10 +16,16 @@ pub struct PullRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct Commit {
+    pub sha: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Payload {
     pub action: Option<String>,
     #[serde(rename = "pull_request")]
     pub pull_request: Option<PullRequest>,
+    pub commits: Option<Vec<Commit>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
