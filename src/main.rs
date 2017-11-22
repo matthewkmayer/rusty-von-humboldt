@@ -7,12 +7,12 @@ extern crate stopwatch;
 extern crate rusoto_core;
 extern crate rusoto_s3;
 
-use stopwatch::Stopwatch;
 use std::io::prelude::*;
-use std::io::BufReader;
+use std::io::{Read, BufReader};
 use std::collections::BTreeMap;
 use std::env;
 use rayon::prelude::*;
+use stopwatch::Stopwatch;
 use rusoto_core::{DefaultCredentialsProvider, Region, default_tls_client};
 use rusoto_s3::{S3, S3Client, ListObjectsV2Request, GetObjectRequest};
 
@@ -47,18 +47,18 @@ fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
                                DefaultCredentialsProvider::new().unwrap(),
                                Region::UsEast1);
 
-    // TODO: refactor to pass stream right into the parser
     let get_req = GetObjectRequest {
         bucket: bucket.to_owned(),
         key: file_on_s3.to_owned(),
         ..Default::default()
     };
 
-    let result = client.get_object(&get_req).expect("Couldn't GET object");
-    println!("get object result: {:#?}", result);
+    let mut result = client.get_object(&get_req).expect("Couldn't GET object");
 
     let stream = BufReader::new(result.body.unwrap());
     let body = stream.bytes().collect::<Result<Vec<u8>, _>>().unwrap();
+
+    // http://alexcrichton.com/flate2-rs/flate2/struct.Decompress.html gunzip it first
 
     parse_ze_file(body)
 }
@@ -73,21 +73,21 @@ fn main() {
     println!("file list is {:#?}", file_list);
     panic!("bailing");
 
-    let mut events: Vec<Event> = file_list
-        .par_iter()
-        .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
-        .collect();
+    // let mut events: Vec<Event> = file_list
+    //     .par_iter()
+    //     .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
+    //     .collect();
 
-    println!("\nGetting events took {}ms\n", sw.elapsed_ms());
+    // println!("\nGetting events took {}ms\n", sw.elapsed_ms());
 
-    sw.restart();
+    // sw.restart();
 
-    let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
-    println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
+    // let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
+    // println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
 
-    sw.restart();
-    print_committers_per_repo(&events, &repo_id_name_map);
-    println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
+    // sw.restart();
+    // print_committers_per_repo(&events, &repo_id_name_map);
+    // println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
 // Assumes the github repo ID doesn't change but the name field can:
