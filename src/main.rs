@@ -6,13 +6,15 @@ extern crate rayon;
 extern crate stopwatch;
 extern crate rusoto_core;
 extern crate rusoto_s3;
+extern crate flate2;
 
 use std::io::prelude::*;
-use std::io::{Read, BufReader};
+use std::io::BufReader;
 use std::collections::BTreeMap;
 use std::env;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
+use flate2::read::GzDecoder;
 use rusoto_core::{DefaultCredentialsProvider, Region, default_tls_client};
 use rusoto_s3::{S3, S3Client, ListObjectsV2Request, GetObjectRequest};
 
@@ -28,7 +30,7 @@ fn construct_list_of_ingest_files() -> Vec<String> {
     let list_obj_req = ListObjectsV2Request {
         bucket: bucket.to_owned(),
         start_after: Some("2016".to_owned()),
-        max_keys: Some(5),
+        max_keys: Some(24),
         ..Default::default()
     };
     let result = client.list_objects_v2(&list_obj_req).expect("Couldn't list items in bucket (v2)");
@@ -41,7 +43,7 @@ fn construct_list_of_ingest_files() -> Vec<String> {
 }
 
 fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
-    // locate and download file from S3
+    println!("Downloading {} from S3", file_on_s3);
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
     let client = S3Client::new(default_tls_client().unwrap(),
                                DefaultCredentialsProvider::new().unwrap(),
@@ -53,14 +55,10 @@ fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
         ..Default::default()
     };
 
-    let mut result = client.get_object(&get_req).expect("Couldn't GET object");
+    let result = client.get_object(&get_req).expect("Couldn't GET object");
+    let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
 
-    let stream = BufReader::new(result.body.unwrap());
-    let body = stream.bytes().collect::<Result<Vec<u8>, _>>().unwrap();
-
-    // http://alexcrichton.com/flate2-rs/flate2/struct.Decompress.html gunzip it first
-
-    parse_ze_file(body)
+    parse_ze_file(BufReader::new(decoder))
 }
 
 fn main() {
@@ -71,23 +69,22 @@ fn main() {
     let file_list = construct_list_of_ingest_files();
 
     println!("file list is {:#?}", file_list);
-    panic!("bailing");
 
-    // let mut events: Vec<Event> = file_list
-    //     .par_iter()
-    //     .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
-    //     .collect();
+    let mut events: Vec<Event> = file_list
+        .par_iter()
+        .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
+        .collect();
 
-    // println!("\nGetting events took {}ms\n", sw.elapsed_ms());
+    println!("\nGetting events took {}ms\n", sw.elapsed_ms());
 
-    // sw.restart();
+    sw.restart();
 
-    // let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
-    // println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
+    let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
+    println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
 
-    // sw.restart();
-    // print_committers_per_repo(&events, &repo_id_name_map);
-    // println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
+    sw.restart();
+    print_committers_per_repo(&events, &repo_id_name_map);
+    println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
 // Assumes the github repo ID doesn't change but the name field can:
@@ -179,9 +176,9 @@ fn is_accepted_pr(event: &Event) -> bool {
     }
 }
 
-fn parse_ze_file<R: Read>(contents: R) -> Result<Vec<Event>, String> {
+fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
     let sw = Stopwatch::start_new();
-    let events: Vec<Event> = BufReader::new(contents)
+    let events: Vec<Event> = contents
         .lines()
         .map(|l| {
             let mut event: Event = serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file.");
