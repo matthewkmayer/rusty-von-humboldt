@@ -31,6 +31,7 @@ pub struct Payload {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Event {
     pub id: String,
+    pub id_as_i64: Option<i64>,
     #[serde(rename = "type")]
     pub event_type: String,
     pub actor: Actor,
