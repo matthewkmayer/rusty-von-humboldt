@@ -1,7 +1,8 @@
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     pub id: i64,
-    pub display_login: String,
+    pub display_login: Option<String>,
+    pub login: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]

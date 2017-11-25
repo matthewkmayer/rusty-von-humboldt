@@ -4,60 +4,81 @@ extern crate serde;
 extern crate serde_json;
 extern crate rayon;
 extern crate stopwatch;
+extern crate rusoto_core;
+extern crate rusoto_s3;
+extern crate flate2;
 
-use stopwatch::Stopwatch;
-use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::collections::BTreeMap;
+use std::env;
 use rayon::prelude::*;
+use stopwatch::Stopwatch;
+use flate2::read::GzDecoder;
+use rusoto_core::{DefaultCredentialsProvider, Region, default_tls_client};
+use rusoto_s3::{S3, S3Client, ListObjectsV2Request, GetObjectRequest};
 
 use rusty_von_humboldt::*;
+
+fn construct_list_of_ingest_files() -> Vec<String> {
+    // Get file list from S3:
+    let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
+    let client = S3Client::new(default_tls_client().unwrap(),
+                               DefaultCredentialsProvider::new().unwrap(),
+                               Region::UsEast1);
+
+    let list_obj_req = ListObjectsV2Request {
+        bucket: bucket.to_owned(),
+        start_after: Some("2016".to_owned()),
+        max_keys: Some(24),
+        ..Default::default()
+    };
+    let result = client.list_objects_v2(&list_obj_req).expect("Couldn't list items in bucket (v2)");
+    let mut files: Vec<String> = Vec::new();
+    for item in result.contents.expect("Should have list of items") {
+        files.push(item.key.expect("Key should exist for S3 item."));
+    }
+
+    files
+}
+
+fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
+    println!("Downloading {} from S3", file_on_s3);
+    let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
+    let client = S3Client::new(default_tls_client().unwrap(),
+                               DefaultCredentialsProvider::new().unwrap(),
+                               Region::UsEast1);
+
+    let get_req = GetObjectRequest {
+        bucket: bucket.to_owned(),
+        key: file_on_s3.to_owned(),
+        ..Default::default()
+    };
+
+    let result = client.get_object(&get_req).expect("Couldn't GET object");
+    let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
+
+    parse_ze_file(BufReader::new(decoder))
+}
 
 fn main() {
     let mut sw = Stopwatch::start_new();
 
     println!("Welcome to Rusty von Humboldt.");
 
+    let file_list = construct_list_of_ingest_files();
 
-    // In the future we'd have the list of files from the authoritative location
-    // such as an S3 bucket.
-    let file_list = vec!["../2017-05-01-0.json",
-                         "../2017-05-01-1.json",
-                         "../2017-05-01-2.json",
-                         "../2017-05-01-3.json",
-                         "../2017-05-01-4.json",
-                         "../2017-05-01-5.json",
-                         "../2017-05-01-6.json",
-                         "../2017-05-01-7.json",
-                         "../2017-05-01-8.json",
-                         "../2017-05-01-9.json",
-                         "../2017-05-01-10.json",
-                         "../2017-05-01-11.json",
-                         "../2017-05-01-12.json",
-                         "../2017-05-01-13.json",
-                         "../2017-05-01-14.json",
-                         "../2017-05-01-15.json",
-                         "../2017-05-01-16.json",
-                         "../2017-05-01-17.json",
-                         "../2017-05-01-18.json",
-                         "../2017-05-01-19.json",
-                         "../2017-05-01-20.json",
-                         "../2017-05-01-21.json",
-                         "../2017-05-01-22.json",
-                         "../2017-05-01-23.json",
-                         ];
-    // parse_ze_file does file IO which is an antipattern with rayon.
-    // Should figure out a way to read things in with a threadpool perhaps.
+    println!("file list is {:#?}", file_list);
+
     let mut events: Vec<Event> = file_list
         .par_iter()
-        .flat_map(|file_name| parse_ze_file(file_name).expect("Issue with file ingest"))
+        .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
         .collect();
 
     println!("\nGetting events took {}ms\n", sw.elapsed_ms());
 
     sw.restart();
-    // This function should be refactored to walk the events list once instead of a whole bunch:
+
     let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
     println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
 
@@ -155,11 +176,9 @@ fn is_accepted_pr(event: &Event) -> bool {
     }
 }
 
-fn parse_ze_file(file_location: &str) -> Result<Vec<Event>, String> {
-    let f = File::open(file_location).expect("file not found");
-
+fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
     let sw = Stopwatch::start_new();
-    let events: Vec<Event> = BufReader::new(f)
+    let events: Vec<Event> = contents
         .lines()
         .map(|l| {
             let mut event: Event = serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file.");
