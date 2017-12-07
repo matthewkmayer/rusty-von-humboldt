@@ -27,7 +27,7 @@ fn main() {
     println!("file list is now {:#?}", file_list);
 
     let mut sw = Stopwatch::start_new();
-    let mut events: Vec<Event> = file_list
+    let mut events: Vec<EventForRepoNames> = file_list
         .par_iter()
         .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
         .collect();
@@ -38,13 +38,13 @@ fn main() {
     let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
     println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
 
-    sw.restart();
-    print_committers_per_repo(&events, &repo_id_name_map);
-    println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
+    // sw.restart();
+    // print_committers_per_repo(&events, &repo_id_name_map);
+    // println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
 // Assumes the github repo ID doesn't change but the name field can:
-fn calculate_up_to_date_name_for_repos(events: &mut Vec<Event>) -> BTreeMap<i64, String> {
+fn calculate_up_to_date_name_for_repos(events: &mut Vec<EventForRepoNames>) -> BTreeMap<i64, String> {
     // Don't assume it's ordered correctly from GHA:
     events.sort_by_key(|ref k| (k.id));
     let mut id_to_latest_repo_name: BTreeMap<i64, String> = BTreeMap::new();
