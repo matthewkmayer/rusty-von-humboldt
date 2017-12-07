@@ -7,3 +7,6 @@ extern crate rusoto_s3;
 
 pub mod types;
 pub use types::*;
+
+pub mod gha_sources;
+pub use gha_sources::*;

@@ -40,6 +40,37 @@ pub struct Event {
     pub payload: Option<Payload>,
 }
 
+impl Event {
+    pub fn is_accepted_pr(&self) -> bool {
+        if self.event_type != "PullRequestEvent" {
+            return false;
+        }
+        match self.payload {
+            Some(ref payload) => match payload.pull_request {
+                Some(ref pr) => match pr.merged {
+                    Some(merged) => merged,
+                    None => false,
+                },
+                None => false,
+            },
+            None => false,
+        }
+    }
+
+    pub fn is_direct_push_event(&self) -> bool {
+        if self.event_type != "PushEvent" {
+            return false;
+        }
+        match self.payload {
+            Some(ref payload) => match payload.commits {
+                Some(ref commits) => commits.len() > 0,
+                None => false,
+            },
+            None => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct PrByActor {
     pub repo: Repo,
