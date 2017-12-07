@@ -19,18 +19,72 @@ use rand::{thread_rng, Rng};
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
 
-    let mut file_list = construct_list_of_ingest_files();
-    println!("file list is {:#?}", file_list);
-    println!("Shuffling input file list");
-    let mut rng = thread_rng();
-    rng.shuffle(&mut file_list);
-    println!("file list is now {:#?}", file_list);
+    let file_list = make_list();
 
     let mut sw = Stopwatch::start_new();
-    let mut events: Vec<Event> = file_list
-        .par_iter()
-        .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
-        .collect();
+    let mut repo_id_to_name: Vec<RepoIdToName> = Vec::new();
+    let mut events: Vec<Event> = Vec::new();
+    
+    // split processing of file list here
+    for chunk in file_list.chunks(2) {
+        println!("My chunk is {:?}", chunk);
+        let event_subset: Vec<Event> = chunk
+            .par_iter()
+            .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
+            .collect();
+
+        // Do repo mapping here (check if it's present, check if it's newer, etc...)
+        for event in event_subset {
+            let update_existing = match repo_id_to_name.iter_mut().find(|repo_item| repo_item.repo_id == event.repo.id && repo_item.repo_name != event.repo.name) {
+                Some(ref mut existing) => {
+                    if existing.event_id > event.id {
+                        println!("Found a renamed repo! repo id: {:?} old name: {:?} new name {:?}", existing.repo_id, existing.repo_name, event.repo.name);
+                        existing.event_id = event.id;
+                        existing.repo_name = event.repo.name.clone();
+                    }
+                    true
+                    },
+                None => false,
+            };
+
+            if !update_existing {
+                repo_id_to_name
+                        .push(RepoIdToName {
+                            repo_id: event.repo.id,
+                            repo_name: event.repo.name,
+                            event_id: event.id
+                        })
+            }
+
+            // if repo_id_to_name.iter().any(|&ref repo_item| repo_item.repo_id == event.repo.id) {
+            //     println!("Seen it before");
+
+            //     // there's a match already, check if we're newer
+            //     let mut first = repo_id_to_name
+            //         .iter_mut()
+            //         .filter(|&ref repo_item| repo_item.repo_id == event.repo.id)
+            //         .map(|mut repo_item| repo_item);
+            // } else {
+            //     println!("Haven't seen it before");
+            //     // no match, insert it
+            //     repo_id_to_name
+            //         .push(RepoIdToName {
+            //             repo_id: event.repo.id,
+            //             repo_name: event.repo.name,
+            //             event_id: event.id
+            //         })
+            // }
+        }
+    }
+
+    // println!("repo_id_to_name is {:#?}", repo_id_to_name);
+
+    // println!("events is {:?}", events);
+
+    // let mut events: Vec<Event> = file_list
+    //     .par_iter()
+    //     .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
+    //     .collect();
 
     println!("\nGetting events took {}ms\n", sw.elapsed_ms());
 
@@ -97,3 +151,19 @@ fn display_actor_count_per_repo(commits_accepted_to_repo: &Vec<PrByActor>, repo_
 
     // println!("\nrepo_name_and_actors: {:#?}", repo_name_and_actors);
 }
+
+fn make_list() -> Vec<String> {
+    let mut file_list = construct_list_of_ingest_files();
+    println!("file list is {:#?}", file_list);
+    println!("Shuffling input file list");
+    let mut rng = thread_rng();
+    rng.shuffle(&mut file_list);
+    println!("file list is now {:#?}", file_list);
+    file_list
+}
+
+// from list of S3 files
+
+// for each chunk of 100
+    // read and deserialize
+    // update the repo name map (if what we have is newer, otherwise insert)
