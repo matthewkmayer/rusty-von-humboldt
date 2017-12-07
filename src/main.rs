@@ -40,7 +40,7 @@ fn main() {
 // Assumes the github repo ID doesn't change but the name field can:
 fn calculate_up_to_date_name_for_repos(events: &mut Vec<Event>) -> BTreeMap<i64, String> {
     // Don't assume it's ordered correctly from GHA:
-    events.sort_by_key(|ref k| (k.id_as_i64.expect("Should be populated is i64")));
+    events.sort_by_key(|ref k| (k.id));
     let mut id_to_latest_repo_name: BTreeMap<i64, String> = BTreeMap::new();
     for event in events {
         id_to_latest_repo_name.
