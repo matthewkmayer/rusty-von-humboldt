@@ -9,6 +9,8 @@ RUN $HOME/.cargo/bin/rustc --version
 WORKDIR /usr/src/rusty-von-humboldt
 COPY . .
 
+# Switch this to --release when we're doing it for reals
 RUN $HOME/.cargo/bin/cargo install
 
-CMD ["/root/.cargo/bin/rusty-von-humboldt"]
+# Use an env file instead? Less rebuilding of things.
+CMD GHABUCKET=foo /root/.cargo/bin/rusty-von-humboldt
