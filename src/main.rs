@@ -10,6 +10,9 @@ extern crate flate2;
 extern crate rand;
 
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::BufWriter;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
 
@@ -26,7 +29,8 @@ fn main() {
     let mut events: Vec<Event> = Vec::new();
     
     // split processing of file list here
-    for chunk in file_list.chunks(2) {
+    // handle pr_events in the same way: chunks at a time
+    for chunk in file_list.chunks(5) {
         println!("My chunk is {:?}", chunk);
         let event_subset: Vec<Event> = chunk
             .par_iter()
@@ -35,9 +39,9 @@ fn main() {
 
         // Do repo mapping here (check if it's present, check if it's newer, etc...)
         for event in event_subset {
-            let update_existing = match repo_id_to_name.iter_mut().find(|repo_item| repo_item.repo_id == event.repo.id && repo_item.repo_name != event.repo.name) {
+            let update_existing = match repo_id_to_name.par_iter_mut().find_any(|repo_item| repo_item.repo_id == event.repo.id && repo_item.event_id < event.id && repo_item.repo_name != event.repo.name) {
                 Some(ref mut existing) => {
-                    if existing.event_id > event.id {
+                    if existing.event_id < event.id {
                         println!("Found a renamed repo! repo id: {:?} old name: {:?} new name {:?}", existing.repo_id, existing.repo_name, event.repo.name);
                         existing.event_id = event.id;
                         existing.repo_name = event.repo.name.clone();
@@ -55,38 +59,14 @@ fn main() {
                             event_id: event.id
                         })
             }
-
-            // if repo_id_to_name.iter().any(|&ref repo_item| repo_item.repo_id == event.repo.id) {
-            //     println!("Seen it before");
-
-            //     // there's a match already, check if we're newer
-            //     let mut first = repo_id_to_name
-            //         .iter_mut()
-            //         .filter(|&ref repo_item| repo_item.repo_id == event.repo.id)
-            //         .map(|mut repo_item| repo_item);
-            // } else {
-            //     println!("Haven't seen it before");
-            //     // no match, insert it
-            //     repo_id_to_name
-            //         .push(RepoIdToName {
-            //             repo_id: event.repo.id,
-            //             repo_name: event.repo.name,
-            //             event_id: event.id
-            //         })
-            // }
         }
+        println!("Items in repo_id_to_name: {:?}", repo_id_to_name.len());
     }
 
-    // println!("repo_id_to_name is {:#?}", repo_id_to_name);
+    let mut file = BufWriter::new(File::create("repo_mappings.txt").expect("Couldn't open file for writing"));
+    file.write_all(format!("{:#?}", repo_id_to_name).as_bytes()).expect("Couldn't write to file");
 
-    // println!("events is {:?}", events);
-
-    // let mut events: Vec<Event> = file_list
-    //     .par_iter()
-    //     .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
-    //     .collect();
-
-    println!("\nGetting events took {}ms\n", sw.elapsed_ms());
+    println!("\nGetting repo mapping took {}ms\n", sw.elapsed_ms());
 
     sw.restart();
     let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
