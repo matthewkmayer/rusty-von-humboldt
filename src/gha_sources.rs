@@ -12,6 +12,8 @@ use rusoto_s3::{S3, S3Client, ListObjectsV2Request, GetObjectRequest};
 use self::flate2::read::GzDecoder;
 use types::*;
 
+const MAX_PAGE_SIZE: i64 = 500;
+
 pub fn construct_list_of_ingest_files() -> Vec<String> {
     // Get file list from S3:
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
@@ -23,16 +25,64 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
                                DefaultCredentialsProvider::new().unwrap(),
                                Region::UsEast1);
 
+    let mut key_count_to_request = 10;
+    // single page if we want less than 1,000 items:
+    if hours_to_process as i64 <= MAX_PAGE_SIZE {
+        key_count_to_request = hours_to_process;
+    }
+
     let list_obj_req = ListObjectsV2Request {
         bucket: bucket.to_owned(),
         start_after: Some(year_to_process.to_owned()),
-        max_keys: Some(hours_to_process),
+        max_keys: Some(key_count_to_request),
         ..Default::default()
     };
     let result = client.list_objects_v2(&list_obj_req).expect("Couldn't list items in bucket (v2)");
     let mut files: Vec<String> = Vec::new();
+
     for item in result.contents.expect("Should have list of items") {
         files.push(item.key.expect("Key should exist for S3 item."));
+    }
+
+    let mut more_to_go = result.next_continuation_token.is_some() || result.continuation_token.is_some();
+    if files.len() >= hours_to_process as usize {
+        more_to_go = false;
+    }
+    let mut continue_token = String::new();
+    match result.next_continuation_token {
+        Some(ref token) => continue_token = token.to_owned(),
+        None => (),
+    }
+
+    match result.continuation_token {
+        Some(ref token) => continue_token = token.to_owned(),
+        None => (),
+    }
+
+    while more_to_go {
+        // less than MAX_PAGE_SIZE items to request? Just request what we need.
+        if (files.len() - (hours_to_process as usize)) <= MAX_PAGE_SIZE as usize {
+            key_count_to_request = (files.len() - (hours_to_process as usize)) as i64;
+        } else {
+            key_count_to_request = MAX_PAGE_SIZE;
+        }
+        let list_obj_req = ListObjectsV2Request {
+            bucket: bucket.to_owned(),
+            start_after: Some(year_to_process.to_owned()),
+            max_keys: Some(key_count_to_request),
+            continuation_token: Some(continue_token.clone()),
+            ..Default::default()
+        };
+        let inner_result = client.list_objects_v2(&list_obj_req).expect("Couldn't list items in bucket (v2)");
+
+        for item in inner_result.contents.expect("Should have list of items") {
+            files.push(item.key.expect("Key should exist for S3 item."));
+        }
+        more_to_go = inner_result.next_continuation_token.is_some() && files.len() <= hours_to_process as usize;
+        match inner_result.next_continuation_token {
+            Some(ref token) => continue_token = token.to_owned(),
+            None => (),
+        }
     }
 
     files
