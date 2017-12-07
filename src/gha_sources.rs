@@ -15,14 +15,18 @@ use types::*;
 pub fn construct_list_of_ingest_files() -> Vec<String> {
     // Get file list from S3:
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
+    let year_to_process = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process");
+    let hours_to_process = env::var("GHAHOURS")
+        .expect("Need GHAHOURS set to number of hours (files) to process")
+        .parse::<i64>().expect("Please set GHAHOURS to an integer value");;
     let client = S3Client::new(default_tls_client().unwrap(),
                                DefaultCredentialsProvider::new().unwrap(),
                                Region::UsEast1);
 
     let list_obj_req = ListObjectsV2Request {
         bucket: bucket.to_owned(),
-        start_after: Some("2017".to_owned()),
-        max_keys: Some(50),
+        start_after: Some(year_to_process.to_owned()),
+        max_keys: Some(hours_to_process),
         ..Default::default()
     };
     let result = client.list_objects_v2(&list_obj_req).expect("Couldn't list items in bucket (v2)");
