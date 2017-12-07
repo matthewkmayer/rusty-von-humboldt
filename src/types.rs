@@ -45,6 +45,15 @@ pub struct Event {
     pub payload: Option<Payload>,
 }
 
+// This is when we only care about the event and the repo it's about
+// to track down the latest name
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct EventForRepoNames {
+    #[serde(deserialize_with = "from_str")]
+    pub id: i64,
+    pub repo: Repo,
+}
+
 impl Event {
     pub fn is_accepted_pr(&self) -> bool {
         if self.event_type != "PullRequestEvent" {
