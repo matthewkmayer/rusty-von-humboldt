@@ -7,18 +7,24 @@ extern crate stopwatch;
 extern crate rusoto_core;
 extern crate rusoto_s3;
 extern crate flate2;
+extern crate rand;
 
 use std::collections::BTreeMap;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
 
 use rusty_von_humboldt::*;
+use rand::{thread_rng, Rng};
 
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
 
-    let file_list = construct_list_of_ingest_files();
+    let mut file_list = construct_list_of_ingest_files();
     println!("file list is {:#?}", file_list);
+    println!("Shuffling input file list");
+    let mut rng = thread_rng();
+    rng.shuffle(&mut file_list);
+    println!("file list is now {:#?}", file_list);
 
     let mut sw = Stopwatch::start_new();
     let mut events: Vec<Event> = file_list
