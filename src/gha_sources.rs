@@ -88,7 +88,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
     files
 }
 
-pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
+pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<EventForRepoNames>, String> {
     println!("Downloading {} from S3", file_on_s3);
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
     let client = S3Client::new(default_tls_client().unwrap(),
@@ -107,8 +107,8 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
     parse_ze_file(BufReader::new(decoder))
 }
 
-fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
-    let events: Vec<Event> = contents
+fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<EventForRepoNames>, String> {
+    let events: Vec<EventForRepoNames> = contents
         .lines()
         .map(|l| {
             serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file.")
