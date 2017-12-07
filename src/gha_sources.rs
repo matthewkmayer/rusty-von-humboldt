@@ -61,9 +61,7 @@ fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
     let events: Vec<Event> = contents
         .lines()
         .map(|l| {
-            let mut event: Event = serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file.");
-            event.id_as_i64 = Some(event.id.parse::<i64>().expect("github ID should be an i64"));
-            event
+            serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file.")
         })
         .collect();
 

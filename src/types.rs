@@ -1,3 +1,8 @@
+use std::fmt::Display;
+use std::str::FromStr;
+
+use serde::de::{self, Deserialize, Deserializer};
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     pub id: i64,
@@ -31,8 +36,8 @@ pub struct Payload {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Event {
-    pub id: String,
-    pub id_as_i64: Option<i64>,
+    #[serde(deserialize_with = "from_str")]
+    pub id: i64,
     #[serde(rename = "type")]
     pub event_type: String,
     pub actor: Actor,
@@ -75,4 +80,13 @@ impl Event {
 pub struct PrByActor {
     pub repo: Repo,
     pub actor: Actor,
+}
+
+fn from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    where T: FromStr,
+          T::Err: Display,
+          D: Deserializer<'de>
+{
+    let s = String::deserialize(deserializer)?;
+    T::from_str(&s).map_err(de::Error::custom)
 }
