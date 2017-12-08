@@ -26,34 +26,48 @@ fn main() {
 
     let mut sw = Stopwatch::start_new();
     let mut repo_id_to_name: Vec<RepoIdToName> = Vec::with_capacity(1000000);
-    let mut commit_events: Vec<Event> = Vec::new();
+    let mut commits_accepted_to_repo: Vec<PrByActor> = Vec::new();
 
     // split processing of file list here
     // handle pr_events in the same way: chunks at a time
-    for chunk in file_list.chunks(5) {
+    for chunk in file_list.chunks(25) {
         println!("My chunk is {:?}", chunk);
         let event_subset: Vec<Event> = chunk
             .par_iter()
             .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
             .collect();
 
+        let mut this_chunk_repo_names: Vec<RepoIdToName> = event_subset
+            .par_iter()
+            .map(|r| RepoIdToName {
+                    repo_id: r.repo.id,
+                    repo_name: r.repo.name.clone(),
+                    event_id: r.id
+                })
+            .collect();
+        repo_id_to_name.append(&mut this_chunk_repo_names);
 
-        // toss every event into the repo_id_to_name and de-dupe later
-        for event in event_subset {
-            repo_id_to_name
-                .push(RepoIdToName {
-                    repo_id: event.repo.id,
-                    repo_name: event.repo.name.clone(),
-                    event_id: event.id
-                });
-            if event.is_accepted_pr() || event.is_direct_push_event() {
-                commit_events.push(event);
-            }
-        }
+        let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = event_subset
+            .par_iter()
+            .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
+            .collect();
+
+        this_chunk_commits_accepted_to_repo.sort();
+        this_chunk_commits_accepted_to_repo.dedup();
+
+        commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
+
+        // TEST THIS (in this project not just playground)
+        repo_id_to_name.sort_by_key(|r| r.repo_id);
+        // a bit interesting since we can get all eventIDs mismashed.
+        // see https://play.rust-lang.org/?gist=74aba1e331605ed3767e75cb99aa2e0d&version=stable
+        repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
+        repo_id_to_name.reverse();
+        repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
+
         println!("Items in repo_id_to_name: {:?}", repo_id_to_name.len());
     }
 
-    // dedupe repo_id_to_name:
     println!("Doing some crunching fun here");
     repo_id_to_name.sort_by_key(|r| r.event_id);
     
@@ -67,8 +81,8 @@ fn main() {
     println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
 
     sw.restart();
-    // TODO: use the vector of repo mappings
-    print_committers_per_repo(&commit_events, &repo_id_name_map);
+
+    print_committers_per_repo(&commits_accepted_to_repo, &repo_id_name_map);
     println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
@@ -83,21 +97,8 @@ fn calculate_up_to_date_name_for_repos(events: &Vec<RepoIdToName>) -> BTreeMap<i
     id_to_latest_repo_name
 }
 
-fn print_committers_per_repo(events: &Vec<Event>, repo_id_name_map: &BTreeMap<i64, String>) {
-    let mut sw = Stopwatch::start_new();
-
-    // naive dumping data into a vec then sort+dedup is faster than checking in each iteration
-    let mut commits_accepted_to_repo: Vec<PrByActor> = events
-        .par_iter()
-        .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
-        .collect();
-
-    commits_accepted_to_repo.sort();
-    commits_accepted_to_repo.dedup();
-
-    println!("Combining PRs and actors took {}ms", sw.elapsed_ms());
-    sw.restart();
-
+fn print_committers_per_repo(commits_accepted_to_repo: &Vec<PrByActor>, repo_id_name_map: &BTreeMap<i64, String>) {
+    let sw = Stopwatch::start_new();
     display_actor_count_per_repo(&commits_accepted_to_repo, repo_id_name_map);
     println!("Tying repos to actors took {}ms", sw.elapsed_ms());
 }
@@ -116,6 +117,8 @@ fn display_actor_count_per_repo(commits_accepted_to_repo: &Vec<PrByActor>, repo_
     }
 
     // println!("\nrepo_name_and_actors: {:#?}", repo_name_and_actors);
+    let mut file = BufWriter::new(File::create("commiter_count.txt").expect("Couldn't open file for writing"));
+    file.write_all(format!("{:#?}", repo_name_and_actors).as_bytes()).expect("Couldn't write to file");
 }
 
 fn make_list() -> Vec<String> {

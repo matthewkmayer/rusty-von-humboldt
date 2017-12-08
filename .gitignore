@@ -12,3 +12,4 @@ Cargo.lock
 **/*.rs.bk
 
 repo_mappings.txt
+commiter_count.txt
