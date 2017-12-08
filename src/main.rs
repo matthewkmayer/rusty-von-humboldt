@@ -30,7 +30,7 @@ fn main() {
 
     // split processing of file list here
     // handle pr_events in the same way: chunks at a time
-    for chunk in file_list.chunks(25) {
+    for chunk in file_list.chunks(50) {
         println!("My chunk is {:?}", chunk);
         let event_subset: Vec<Event> = chunk
             .par_iter()
@@ -47,15 +47,20 @@ fn main() {
             .collect();
         repo_id_to_name.append(&mut this_chunk_repo_names);
 
-        let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = event_subset
-            .par_iter()
-            .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
-            .collect();
+        // the committer count info can happen later.
+        // let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = event_subset
+        //     .par_iter()
+        //     .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
+        //     .collect();
 
-        this_chunk_commits_accepted_to_repo.sort();
-        this_chunk_commits_accepted_to_repo.dedup();
+        // // don't put dupes into the collector
+        // this_chunk_commits_accepted_to_repo.sort();
+        // this_chunk_commits_accepted_to_repo.dedup();
 
-        commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
+        // commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
+        // // any dupes from across chunks should also be addressed:
+        // commits_accepted_to_repo.sort();
+        // commits_accepted_to_repo.dedup();
 
         // TEST THIS (in this project not just playground)
         repo_id_to_name.sort_by_key(|r| r.repo_id);
@@ -70,6 +75,8 @@ fn main() {
 
     println!("Doing some crunching fun here");
     repo_id_to_name.sort_by_key(|r| r.event_id);
+    commits_accepted_to_repo.sort();
+    commits_accepted_to_repo.dedup();
     
     let mut file = BufWriter::new(File::create("repo_mappings.txt").expect("Couldn't open file for writing"));
     file.write_all(format!("{:#?}", repo_id_to_name).as_bytes()).expect("Couldn't write to file");
