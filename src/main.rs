@@ -19,7 +19,7 @@ use stopwatch::Stopwatch;
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
 
-const CHUNK_SIZE: i64 = 10;
+const CHUNK_SIZE: i64 = 100;
 
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
@@ -58,6 +58,8 @@ fn main() {
             commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
         }
         approx_files_seen += CHUNK_SIZE;
+
+        // Should we write the existing data to disk? Load later as needed?
     }
 
     println!("Doing some crunching fun here");
@@ -74,10 +76,11 @@ fn main() {
     let repo_id_name_map = calculate_up_to_date_name_for_repos(&repo_id_to_name);
     println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
 
-    sw.restart();
-
-    print_committers_per_repo(&commits_accepted_to_repo, &repo_id_name_map);
-    println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
+    if do_committer_counts {
+        sw.restart();
+        print_committers_per_repo(&commits_accepted_to_repo, &repo_id_name_map);
+        println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
+    }
 }
 
 // Assumes the github repo ID doesn't change but the name field can:
