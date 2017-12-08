@@ -29,7 +29,7 @@ fn main() {
 
     let mut sw = Stopwatch::start_new();
 
-    let mut repo_id_to_name: Vec<RepoIdToName> = Vec::new();
+    let mut repo_id_to_name: Vec<Vec<RepoIdToName>> = Vec::new();
     let mut commits_accepted_to_repo: Vec<PrByActor> = Vec::new();
 
     let mut approx_files_seen: i64 = 0;
@@ -39,17 +39,17 @@ fn main() {
         let event_subset = get_event_subset(chunk);
 
         let mut this_chunk_repo_names = repo_id_to_name_mappings(&event_subset);
-        repo_id_to_name.append(&mut this_chunk_repo_names);
+        repo_id_to_name.push(this_chunk_repo_names);
 
-        // TEST THIS (in this project not just playground)
-        repo_id_to_name.sort_by_key(|r| r.repo_id);
-        // a bit interesting since we can get all eventIDs mismashed.
-        // see https://play.rust-lang.org/?gist=74aba1e331605ed3767e75cb99aa2e0d&version=stable
-        repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
-        repo_id_to_name.reverse();
-        repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
+        // // TEST THIS (in this project not just playground)
+        // repo_id_to_name.sort_by_key(|r| r.repo_id);
+        // // a bit interesting since we can get all eventIDs mismashed.
+        // // see https://play.rust-lang.org/?gist=74aba1e331605ed3767e75cb99aa2e0d&version=stable
+        // repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
+        // repo_id_to_name.reverse();
+        // repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
 
-        println!("Items in repo_id_to_name: {:?}\n", repo_id_to_name.len());
+        // println!("Items in repo_id_to_name: {:?}\n", repo_id_to_name.len());
 
         if do_committer_counts {
             let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = committers_to_repo(&event_subset);
@@ -63,7 +63,7 @@ fn main() {
     }
 
     println!("Doing some crunching fun here");
-    repo_id_to_name.sort_by_key(|r| r.event_id);
+    // repo_id_to_name.sort_by_key(|r| r.event_id);
     commits_accepted_to_repo.sort();
     commits_accepted_to_repo.dedup();
     
@@ -84,12 +84,13 @@ fn main() {
 }
 
 // Assumes the github repo ID doesn't change but the name field can:
-fn calculate_up_to_date_name_for_repos(events: &Vec<RepoIdToName>) -> BTreeMap<i64, String> {
+fn calculate_up_to_date_name_for_repos(events: &Vec<Vec<RepoIdToName>>) -> BTreeMap<i64, String> {
+    // how do we make this work with nested vec?
     let mut id_to_latest_repo_name: BTreeMap<i64, String> = BTreeMap::new();
-    for event in events {
-        id_to_latest_repo_name.
-            insert(event.repo_id, event.repo_name.to_string());
-    }
+    // for event in events {
+    //     id_to_latest_repo_name.
+    //         insert(event.repo_id, event.repo_name.to_string());
+    // }
 
     id_to_latest_repo_name
 }
