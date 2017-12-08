@@ -82,6 +82,14 @@ pub struct PrByActor {
     pub actor: Actor,
 }
 
+// Let us figure out if there is a new name for the repo
+#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct RepoIdToName {
+    pub repo_id: i64,
+    pub repo_name: String,
+    pub event_id: i64,
+}
+
 fn from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
     where T: FromStr,
           T::Err: Display,
