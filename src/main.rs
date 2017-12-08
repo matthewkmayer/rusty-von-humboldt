@@ -21,46 +21,22 @@ use rand::{thread_rng, Rng};
 
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
-
+    
+    let do_committer_counts = false;
     let file_list = make_list();
 
     let mut sw = Stopwatch::start_new();
-    let mut repo_id_to_name: Vec<RepoIdToName> = Vec::with_capacity(1000000);
+
+    let mut repo_id_to_name: Vec<RepoIdToName> = Vec::new();
     let mut commits_accepted_to_repo: Vec<PrByActor> = Vec::new();
 
     // split processing of file list here
-    // handle pr_events in the same way: chunks at a time
-    for chunk in file_list.chunks(50) {
+    for chunk in file_list.chunks(25) {
         println!("My chunk is {:?}", chunk);
-        let event_subset: Vec<Event> = chunk
-            .par_iter()
-            .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
-            .collect();
+        let event_subset = get_event_subset(chunk);
 
-        let mut this_chunk_repo_names: Vec<RepoIdToName> = event_subset
-            .par_iter()
-            .map(|r| RepoIdToName {
-                    repo_id: r.repo.id,
-                    repo_name: r.repo.name.clone(),
-                    event_id: r.id
-                })
-            .collect();
+        let mut this_chunk_repo_names = repo_id_to_name_mappings(&event_subset);
         repo_id_to_name.append(&mut this_chunk_repo_names);
-
-        // the committer count info can happen later.
-        // let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = event_subset
-        //     .par_iter()
-        //     .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
-        //     .collect();
-
-        // // don't put dupes into the collector
-        // this_chunk_commits_accepted_to_repo.sort();
-        // this_chunk_commits_accepted_to_repo.dedup();
-
-        // commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
-        // // any dupes from across chunks should also be addressed:
-        // commits_accepted_to_repo.sort();
-        // commits_accepted_to_repo.dedup();
 
         // TEST THIS (in this project not just playground)
         repo_id_to_name.sort_by_key(|r| r.repo_id);
@@ -71,6 +47,13 @@ fn main() {
         repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
 
         println!("Items in repo_id_to_name: {:?}", repo_id_to_name.len());
+
+        if do_committer_counts {
+            let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = committers_to_repo(&event_subset);
+            this_chunk_commits_accepted_to_repo.sort();
+            this_chunk_commits_accepted_to_repo.dedup();
+            commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
+        }
     }
 
     println!("Doing some crunching fun here");
@@ -138,8 +121,27 @@ fn make_list() -> Vec<String> {
     file_list
 }
 
-// from list of S3 files
+fn get_event_subset(chunk: &[String]) -> Vec<Event> {
+    chunk
+        .par_iter()
+        .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
+        .collect()
+}
 
-// for each chunk of 100
-    // read and deserialize
-    // update the repo name map (if what we have is newer, otherwise insert)
+fn repo_id_to_name_mappings(events: &Vec<Event>) -> Vec<RepoIdToName> {
+    events
+        .par_iter()
+        .map(|r| RepoIdToName {
+                repo_id: r.repo.id,
+                repo_name: r.repo.name.clone(),
+                event_id: r.id
+            })
+        .collect()
+}
+
+fn committers_to_repo(events: &Vec<Event>) -> Vec<PrByActor> {
+    events
+        .par_iter()
+        .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
+        .collect()
+}
