@@ -116,11 +116,10 @@ pub struct RepoIdToName {
 
 impl RepoIdToName {
     pub fn as_sql(&self) -> String {
-        // TODO: upsert: if ours is newer, we win!
         format!("INSERT INTO foo (repo_id, repo_name, event_id)
-            VALUES ({repo_id}, {repo_name}, {event_id})
-            ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_id) = ({repo_name}, {event_id})
-            WHERE ",
+            VALUES ({repo_id}, '{repo_name}', {event_id})
+            ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_id) = ('{repo_name}', {event_id})
+            WHERE event_id < EXCLUDED.event_id",
             repo_id = self.repo_id,
             repo_name = self.repo_name,
             event_id = self.event_id).replace("\n", "")
