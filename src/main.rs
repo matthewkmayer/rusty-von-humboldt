@@ -65,7 +65,7 @@ fn main() {
     // repo_id_to_name.sort_by_key(|r| r.event_id);
 
     println!("\nGetting repo mapping took {}ms\n", sw.elapsed_ms());
-    print_repo_mappings(&repo_id_to_name);
+    repo_mappings_as_sql(&repo_id_to_name);
 
     sw.restart();
     let repo_id_name_map = calculate_up_to_date_name_for_repos(&repo_id_to_name);
@@ -80,14 +80,13 @@ fn main() {
     }
 }
 
-fn print_repo_mappings(repo_id_details: &Vec<Vec<RepoIdToName>>) {
-    // let mut file = BufWriter::new(File::create("repo_mappings.txt").expect("Couldn't open file for writing"));
+fn repo_mappings_as_sql(repo_id_details: &Vec<Vec<RepoIdToName>>) {
     for (i, repo_list) in repo_id_details.iter().enumerate() {
         let mut file = BufWriter::new(File::create(format!("repo_mappings_{:?}.txt", i)).expect("Couldn't open file for writing"));
-        file.write_all(format!("{:#?}", repo_list).as_bytes()).expect("Couldn't write to file");
+        for repo_id_detail in repo_list {
+            file.write_all(format!("{:#?}\n", repo_id_detail.as_sql()).as_bytes()).expect("Couldn't write to file");
+        }
     }
-    // this is probably real bad for performance:
-    // file.write_all(format!("{:#?}", repo_id_details).as_bytes()).expect("Couldn't write to file");
 }
 
 // Assumes the github repo ID doesn't change but the name field can:
