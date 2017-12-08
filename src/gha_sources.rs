@@ -137,7 +137,6 @@ fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
     // We tossed in the fake events, don't pass them back up
     events.retain(|event| !event.is_temp_one());
     events.shrink_to_fit();
-    println!("events vec went from capacity of {:?} to {:?}", size_before, events.capacity());
 
     Ok(events)
 }

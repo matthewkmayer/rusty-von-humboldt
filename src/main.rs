@@ -26,7 +26,7 @@ use rusoto_s3::{S3, S3Client, PutObjectRequest};
 
 // Chunk size controls size of output files and roughly the amount of parallelism
 // when downloading and deserializing files.
-const CHUNK_SIZE: i64 = 50;
+const CHUNK_SIZE: i64 = 500;
 
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
