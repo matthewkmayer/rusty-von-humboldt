@@ -46,6 +46,30 @@ pub struct Event {
 }
 
 impl Event {
+    pub fn new() -> Event {
+        Event {
+            id: -1,
+            event_type: "n/a".to_string(),
+            actor: Actor {
+                id: -1,
+                display_login: None,
+                login: None,
+            },
+            repo: Repo {
+                id: -1,
+                name: "n/a".to_string(),
+            },
+            payload: None,
+        }
+    }
+
+    pub fn is_temp_one(&self) -> bool{
+        if self.id == -1 && self.repo.id == -1 && self.actor.id == -1 {
+            return true;
+        }
+        false
+    }
+
     pub fn is_accepted_pr(&self) -> bool {
         if self.event_type != "PullRequestEvent" {
             return false;

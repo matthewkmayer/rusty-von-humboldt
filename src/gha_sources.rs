@@ -89,7 +89,6 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 }
 
 pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
-    println!("Downloading {} from S3", file_on_s3);
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
     let client = S3Client::new(default_tls_client().unwrap(),
                                DefaultCredentialsProvider::new().unwrap(),
@@ -101,19 +100,41 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
         ..Default::default()
     };
 
-    let result = client.get_object(&get_req).expect("Couldn't GET object");
+    let result = match client.get_object(&get_req) {
+        Ok(s3_result) => s3_result,
+        Err(err) => {
+            println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            match client.get_object(&get_req) {
+                Ok(s3_result) => s3_result,
+                Err(err) => {
+                    println!("Failed to get {:?} from S3, second attempt.", file_on_s3);
+                    return Err(format!("{:?}", err));
+                },
+            }
+        }
+    };
     let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
-    println!("Parsing {}", file_on_s3);
     parse_ze_file(BufReader::new(decoder))
 }
 
 fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
-    let events: Vec<Event> = contents
+    let mut events: Vec<Event> = contents
         .lines()
         .map(|l| {
-            serde_json::from_str(&l.unwrap()).expect("Couldn't deserialize event file.")
+            let event_found: Event = match serde_json::from_str(&l.unwrap()) {
+                Ok(event) => event,
+                Err(err) => {
+                    println!("Found a weird line of json, got this error: {:?}", err);
+                    // make a fake one to toss out later
+                    return Event::new();
+                }
+            };
+            event_found
         })
         .collect();
+
+    // We tossed in the fake events, don't pass them back up
+    events.retain(|event| !event.is_temp_one());
 
     Ok(events)
 }
