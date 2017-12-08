@@ -11,5 +11,5 @@ Cargo.lock
 /target/
 **/*.rs.bk
 
-repo_mappings.txt
-commiter_count.txt
+repo_mappings*.txt
+commiter_count*.txt

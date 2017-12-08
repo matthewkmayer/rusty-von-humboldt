@@ -114,6 +114,18 @@ pub struct RepoIdToName {
     pub event_id: i64,
 }
 
+impl RepoIdToName {
+    pub fn as_sql(&self) -> String {
+        format!("INSERT INTO repo_mapping (repo_id, repo_name, event_id)
+            VALUES ({repo_id}, '{repo_name}', {event_id})
+            ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_id) = ('{repo_name}', {event_id})
+            WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_id < EXCLUDED.event_id;",
+            repo_id = self.repo_id,
+            repo_name = self.repo_name,
+            event_id = self.event_id).replace("\n", "")
+    }
+}
+
 fn from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
     where T: FromStr,
           T::Err: Display,

@@ -40,16 +40,6 @@ fn main() {
 
         repo_id_to_name.push(repo_id_to_name_mappings(&event_subset));
 
-        // // TEST THIS (in this project not just playground)
-        // repo_id_to_name.sort_by_key(|r| r.repo_id);
-        // // a bit interesting since we can get all eventIDs mismashed.
-        // // see https://play.rust-lang.org/?gist=74aba1e331605ed3767e75cb99aa2e0d&version=stable
-        // repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
-        // repo_id_to_name.reverse();
-        // repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
-
-        // println!("Items in repo_id_to_name: {:?}\n", repo_id_to_name.len());
-
         if do_committer_counts {
             let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = committers_to_repo(&event_subset);
             this_chunk_commits_accepted_to_repo.sort();
@@ -57,49 +47,31 @@ fn main() {
             commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
         }
         approx_files_seen += CHUNK_SIZE;
-
-        // Should we write the existing data to disk? Load later as needed?
     }
 
     println!("Doing some crunching fun here");
-    // repo_id_to_name.sort_by_key(|r| r.event_id);
-
     println!("\nGetting repo mapping took {}ms\n", sw.elapsed_ms());
-    print_repo_mappings(&repo_id_to_name);
+    repo_mappings_as_sql(&repo_id_to_name);
 
-    sw.restart();
-    let repo_id_name_map = calculate_up_to_date_name_for_repos(&repo_id_to_name);
-    println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
-
+    // In a bit of a half-baked state while we move repo ids to a database
     if do_committer_counts {
         sw.restart();
         commits_accepted_to_repo.sort();
         commits_accepted_to_repo.dedup();
+
+        let repo_id_name_map: BTreeMap<i64, String> = BTreeMap::new();
         print_committers_per_repo(&commits_accepted_to_repo, &repo_id_name_map);
         println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
     }
 }
 
-fn print_repo_mappings(repo_id_details: &Vec<Vec<RepoIdToName>>) {
-    // let mut file = BufWriter::new(File::create("repo_mappings.txt").expect("Couldn't open file for writing"));
+fn repo_mappings_as_sql(repo_id_details: &Vec<Vec<RepoIdToName>>) {
     for (i, repo_list) in repo_id_details.iter().enumerate() {
         let mut file = BufWriter::new(File::create(format!("repo_mappings_{:?}.txt", i)).expect("Couldn't open file for writing"));
-        file.write_all(format!("{:#?}", repo_list).as_bytes()).expect("Couldn't write to file");
+        for repo_id_detail in repo_list {
+            file.write_all(format!("{}\n", repo_id_detail.as_sql()).as_bytes()).expect("Couldn't write to file");
+        }
     }
-    // this is probably real bad for performance:
-    // file.write_all(format!("{:#?}", repo_id_details).as_bytes()).expect("Couldn't write to file");
-}
-
-// Assumes the github repo ID doesn't change but the name field can:
-fn calculate_up_to_date_name_for_repos(events: &Vec<Vec<RepoIdToName>>) -> BTreeMap<i64, String> {
-    // how do we make this work with nested vec?
-    let mut id_to_latest_repo_name: BTreeMap<i64, String> = BTreeMap::new();
-    // for event in events {
-    //     id_to_latest_repo_name.
-    //         insert(event.repo_id, event.repo_name.to_string());
-    // }
-
-    id_to_latest_repo_name
 }
 
 fn print_committers_per_repo(commits_accepted_to_repo: &Vec<PrByActor>, repo_id_name_map: &BTreeMap<i64, String>) {
