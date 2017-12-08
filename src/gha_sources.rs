@@ -101,7 +101,19 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
         ..Default::default()
     };
 
-    let result = client.get_object(&get_req).expect("Couldn't GET object");
+    let result = match client.get_object(&get_req) {
+        Ok(s3_result) => s3_result,
+        Err(err) => {
+            println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            match client.get_object(&get_req) {
+                Ok(s3_result) => s3_result,
+                Err(err) => {
+                    println!("Failed to get {:?} from S3, second attempt.", file_on_s3);
+                    return Err(format!("{:?}", err));
+                },
+            }
+        }
+    };
     let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
     println!("Parsing {}", file_on_s3);
     parse_ze_file(BufReader::new(decoder))
