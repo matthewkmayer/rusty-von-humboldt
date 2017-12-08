@@ -34,7 +34,7 @@ fn main() {
 
     let mut approx_files_seen: i64 = 0;
     // split processing of file list here
-    for chunk in file_list.chunks(CHUNK_SIZE as usize).into_iter() {
+    for chunk in file_list.chunks(CHUNK_SIZE as usize) {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
         let event_subset = get_event_subset(chunk);
 
