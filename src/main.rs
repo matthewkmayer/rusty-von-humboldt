@@ -25,8 +25,8 @@ fn main() {
     let file_list = make_list();
 
     let mut sw = Stopwatch::start_new();
-    let mut repo_id_to_name: Vec<RepoIdToName> = Vec::new();
-    let mut events: Vec<Event> = Vec::new();
+    let mut repo_id_to_name: Vec<RepoIdToName> = Vec::with_capacity(1000000);
+    let mut commit_events: Vec<Event> = Vec::new();
     
     // split processing of file list here
     // handle pr_events in the same way: chunks at a time
@@ -37,43 +37,57 @@ fn main() {
             .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
             .collect();
 
-        // Do repo mapping here (check if it's present, check if it's newer, etc...)
-        for event in event_subset {
-            let update_existing = match repo_id_to_name.par_iter_mut().find_any(|repo_item| repo_item.repo_id == event.repo.id && repo_item.event_id < event.id && repo_item.repo_name != event.repo.name) {
-                Some(ref mut existing) => {
-                    if existing.event_id < event.id {
-                        println!("Found a renamed repo! repo id: {:?} old name: {:?} new name {:?}", existing.repo_id, existing.repo_name, event.repo.name);
-                        existing.event_id = event.id;
-                        existing.repo_name = event.repo.name.clone();
-                    }
-                    true
-                    },
-                None => false,
-            };
 
-            if !update_existing {
-                repo_id_to_name
-                        .push(RepoIdToName {
-                            repo_id: event.repo.id,
-                            repo_name: event.repo.name,
-                            event_id: event.id
-                        })
+        // toss every event into the repo_id_to_name and de-dupe later?
+
+        for event in event_subset {
+            repo_id_to_name
+                .push(RepoIdToName {
+                    repo_id: event.repo.id,
+                    repo_name: event.repo.name.clone(),
+                    event_id: event.id
+                });
+            if event.is_accepted_pr() || event.is_direct_push_event() {
+                commit_events.push(event);
             }
         }
         println!("Items in repo_id_to_name: {:?}", repo_id_to_name.len());
+
+        // dedupe repo_id_to_name here if need to reduce memory pressure
+    }
+
+    // dedupe repo_id_to_name:
+    println!("Doing some single crunching fun here");
+    let mut repo_id_to_name_deduped: Vec<&RepoIdToName> = Vec::with_capacity(1000000);
+    let repo_ids: Vec<i64> = repo_id_to_name.iter().map(|r| r.repo_id).collect();
+    println!("We're mapping {:?} repo IDs to their latest names", repo_ids.len());
+    for repo_id in repo_ids {
+        // sort is ascending, we want the last entry which is the latest
+        let mut all_names_for_repo: Vec<&RepoIdToName> = repo_id_to_name
+            .par_iter()// drain instead?
+            .filter(|r| r.repo_id == repo_id)
+            .collect();
+
+        all_names_for_repo.sort_by_key(|r| r.event_id);
+
+        let to_push = all_names_for_repo
+            .last()
+            .expect("Should have a repo item");
+        repo_id_to_name_deduped.push(to_push);
     }
 
     let mut file = BufWriter::new(File::create("repo_mappings.txt").expect("Couldn't open file for writing"));
-    file.write_all(format!("{:#?}", repo_id_to_name).as_bytes()).expect("Couldn't write to file");
+    file.write_all(format!("{:#?}", repo_id_to_name_deduped).as_bytes()).expect("Couldn't write to file");
 
     println!("\nGetting repo mapping took {}ms\n", sw.elapsed_ms());
 
     sw.restart();
-    let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut events);
+    let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut commit_events);
     println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
 
     sw.restart();
-    print_committers_per_repo(&events, &repo_id_name_map);
+    // TODO: use the vector of repo mappings
+    print_committers_per_repo(&commit_events, &repo_id_name_map);
     println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
 }
 
@@ -92,16 +106,9 @@ fn calculate_up_to_date_name_for_repos(events: &mut Vec<Event>) -> BTreeMap<i64,
 
 fn print_committers_per_repo(events: &Vec<Event>, repo_id_name_map: &BTreeMap<i64, String>) {
     let mut sw = Stopwatch::start_new();
-    let pr_events: Vec<&Event> = events
-        .into_par_iter()
-        .filter(|event| event.is_accepted_pr() || event.is_direct_push_event())
-        .collect();
-
-    println!("finding PR events took {}ms", sw.elapsed_ms());
-    sw.restart();
 
     // naive dumping data into a vec then sort+dedup is faster than checking in each iteration
-    let mut commits_accepted_to_repo: Vec<PrByActor> = pr_events
+    let mut commits_accepted_to_repo: Vec<PrByActor> = events
         .par_iter()
         .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
         .collect();
