@@ -19,6 +19,8 @@ use stopwatch::Stopwatch;
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
 
+const CHUNK_SIZE: i64 = 10;
+
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
     
@@ -30,9 +32,10 @@ fn main() {
     let mut repo_id_to_name: Vec<RepoIdToName> = Vec::new();
     let mut commits_accepted_to_repo: Vec<PrByActor> = Vec::new();
 
+    let mut approx_files_seen: i64 = 0;
     // split processing of file list here
-    for chunk in file_list.chunks(25) {
-        println!("My chunk is {:?}", chunk);
+    for chunk in file_list.chunks(CHUNK_SIZE as usize).into_iter() {
+        println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
         let event_subset = get_event_subset(chunk);
 
         let mut this_chunk_repo_names = repo_id_to_name_mappings(&event_subset);
@@ -46,7 +49,7 @@ fn main() {
         repo_id_to_name.reverse();
         repo_id_to_name.dedup_by(|a, b| a.repo_id == b.repo_id && a.event_id < b.event_id);
 
-        println!("Items in repo_id_to_name: {:?}", repo_id_to_name.len());
+        println!("Items in repo_id_to_name: {:?}\n", repo_id_to_name.len());
 
         if do_committer_counts {
             let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = committers_to_repo(&event_subset);
@@ -54,6 +57,7 @@ fn main() {
             this_chunk_commits_accepted_to_repo.dedup();
             commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
         }
+        approx_files_seen += CHUNK_SIZE;
     }
 
     println!("Doing some crunching fun here");
@@ -113,8 +117,6 @@ fn display_actor_count_per_repo(commits_accepted_to_repo: &Vec<PrByActor>, repo_
 
 fn make_list() -> Vec<String> {
     let mut file_list = construct_list_of_ingest_files();
-    println!("file list is {:#?}", file_list);
-    println!("Shuffling input file list");
     let mut rng = thread_rng();
     rng.shuffle(&mut file_list);
     println!("file list is now {:#?}", file_list);
