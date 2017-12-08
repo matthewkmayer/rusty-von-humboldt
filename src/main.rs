@@ -27,7 +27,7 @@ fn main() {
     let mut sw = Stopwatch::start_new();
     let mut repo_id_to_name: Vec<RepoIdToName> = Vec::with_capacity(1000000);
     let mut commit_events: Vec<Event> = Vec::new();
-    
+
     // split processing of file list here
     // handle pr_events in the same way: chunks at a time
     for chunk in file_list.chunks(5) {
@@ -38,8 +38,7 @@ fn main() {
             .collect();
 
 
-        // toss every event into the repo_id_to_name and de-dupe later?
-
+        // toss every event into the repo_id_to_name and de-dupe later
         for event in event_subset {
             repo_id_to_name
                 .push(RepoIdToName {
@@ -52,37 +51,19 @@ fn main() {
             }
         }
         println!("Items in repo_id_to_name: {:?}", repo_id_to_name.len());
-
-        // dedupe repo_id_to_name here if need to reduce memory pressure
     }
 
     // dedupe repo_id_to_name:
-    println!("Doing some single crunching fun here");
-    let mut repo_id_to_name_deduped: Vec<&RepoIdToName> = Vec::with_capacity(1000000);
-    let repo_ids: Vec<i64> = repo_id_to_name.iter().map(|r| r.repo_id).collect();
-    println!("We're mapping {:?} repo IDs to their latest names", repo_ids.len());
-    for repo_id in repo_ids {
-        // sort is ascending, we want the last entry which is the latest
-        let mut all_names_for_repo: Vec<&RepoIdToName> = repo_id_to_name
-            .par_iter()// drain instead?
-            .filter(|r| r.repo_id == repo_id)
-            .collect();
-
-        all_names_for_repo.sort_by_key(|r| r.event_id);
-
-        let to_push = all_names_for_repo
-            .last()
-            .expect("Should have a repo item");
-        repo_id_to_name_deduped.push(to_push);
-    }
-
+    println!("Doing some crunching fun here");
+    repo_id_to_name.sort_by_key(|r| r.event_id);
+    
     let mut file = BufWriter::new(File::create("repo_mappings.txt").expect("Couldn't open file for writing"));
-    file.write_all(format!("{:#?}", repo_id_to_name_deduped).as_bytes()).expect("Couldn't write to file");
+    file.write_all(format!("{:#?}", repo_id_to_name).as_bytes()).expect("Couldn't write to file");
 
     println!("\nGetting repo mapping took {}ms\n", sw.elapsed_ms());
 
     sw.restart();
-    let repo_id_name_map = calculate_up_to_date_name_for_repos(&mut commit_events);
+    let repo_id_name_map = calculate_up_to_date_name_for_repos(&repo_id_to_name);
     println!("\ncalculate_up_to_date_name_for_repos took {}ms\n", sw.elapsed_ms());
 
     sw.restart();
@@ -92,13 +73,11 @@ fn main() {
 }
 
 // Assumes the github repo ID doesn't change but the name field can:
-fn calculate_up_to_date_name_for_repos(events: &mut Vec<Event>) -> BTreeMap<i64, String> {
-    // Don't assume it's ordered correctly from GHA:
-    events.sort_by_key(|ref k| (k.id));
+fn calculate_up_to_date_name_for_repos(events: &Vec<RepoIdToName>) -> BTreeMap<i64, String> {
     let mut id_to_latest_repo_name: BTreeMap<i64, String> = BTreeMap::new();
     for event in events {
         id_to_latest_repo_name.
-            insert(event.repo.id, event.repo.name.to_string());
+            insert(event.repo_id, event.repo_name.to_string());
     }
 
     id_to_latest_repo_name
