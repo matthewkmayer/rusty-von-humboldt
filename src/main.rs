@@ -26,7 +26,7 @@ use rusoto_s3::{S3, S3Client, PutObjectRequest};
 
 // Chunk size controls size of output files and roughly the amount of parallelism
 // when downloading and deserializing files.
-const CHUNK_SIZE: i64 = 500;
+const CHUNK_SIZE: i64 = 300;
 
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
@@ -69,6 +69,8 @@ fn main() {
         print_committers_per_repo(&commits_accepted_to_repo, &repo_id_name_map);
         println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
     }
+
+    println!("This is Rusty von Humboldt, heading home.");
 }
 
 fn repo_mappings_as_sql_to_s3(repo_id_details: &Vec<RepoIdToName>, i: &i64, year: &i32) {
