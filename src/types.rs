@@ -3,6 +3,18 @@ use std::str::FromStr;
 
 use serde::de::{self, Deserialize, Deserializer};
 
+// Use case: for either pre-2015 or post-2015 object:
+// convert to RepoIdToName type
+// for each of those, generate upsert statements
+// upload that string to S3
+trait RepoEvent {
+    fn is_push_event_or_pr(&self) -> bool;
+    // convert to a proper time type?
+    fn timestamp(&self) -> String;
+    fn repo_name(&self) -> String;
+    fn to_upsert_statement(&self) -> String;
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     #[serde(default = "id_not_specified")]
@@ -40,6 +52,8 @@ pub struct Event {
     #[serde(deserialize_with = "from_str")]
     pub id: i64,
     // Actually a datetime, may need to adjust later
+    // EG: "created_at": "2013-01-01T12:00:17-08:00" for pre-2015
+    // "created_at": "2017-05-01T00:59:44Z" for post-2015
     pub created_at: String,
     #[serde(rename = "type")]
     pub event_type: String,
@@ -134,6 +148,7 @@ pub struct PrByActor {
 }
 
 // Let us figure out if there is a new name for the repo
+// TODO: pre-2015 events don't have event_id, switch that to the created_at timestamp
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct RepoIdToName {
     pub repo_id: i64,
