@@ -13,32 +13,41 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
+use std::env;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
+use flate2::Compression;
+use flate2::write::GzEncoder;
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
+use rusoto_core::{DefaultCredentialsProvider, Region, default_tls_client};
+use rusoto_s3::{S3, S3Client, PutObjectRequest};
 
-const CHUNK_SIZE: i64 = 20;
+// Chunk size controls size of output files and roughly the amount of parallelism
+// when downloading and deserializing files.
+const CHUNK_SIZE: i64 = 300;
 
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
     
+    env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
+    let year_to_process: i32 = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process").parse::<i32>().expect("Please set GHAYEAR to an integer value");;
+
     let do_committer_counts = false;
     let file_list = make_list();
 
     let mut sw = Stopwatch::start_new();
-
-    let mut repo_id_to_name: Vec<Vec<RepoIdToName>> = Vec::new();
     let mut commits_accepted_to_repo: Vec<PrByActor> = Vec::new();
 
     let mut approx_files_seen: i64 = 0;
+    let mut i: i64 = 0;
     // split processing of file list here
     for chunk in file_list.chunks(CHUNK_SIZE as usize) {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
         let event_subset = get_event_subset(chunk);
 
-        repo_id_to_name.push(repo_id_to_name_mappings(&event_subset));
+        repo_mappings_as_sql_to_s3(&repo_id_to_name_mappings(&event_subset), &i, &year_to_process);
 
         if do_committer_counts {
             let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = committers_to_repo(&event_subset);
@@ -47,11 +56,8 @@ fn main() {
             commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
         }
         approx_files_seen += CHUNK_SIZE;
+        i += 1;
     }
-
-    println!("Doing some crunching fun here");
-    println!("\nGetting repo mapping took {}ms\n", sw.elapsed_ms());
-    repo_mappings_as_sql(&repo_id_to_name);
 
     // In a bit of a half-baked state while we move repo ids to a database
     if do_committer_counts {
@@ -63,14 +69,39 @@ fn main() {
         print_committers_per_repo(&commits_accepted_to_repo, &repo_id_name_map);
         println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
     }
+
+    println!("This is Rusty von Humboldt, heading home.");
 }
 
-fn repo_mappings_as_sql(repo_id_details: &Vec<Vec<RepoIdToName>>) {
-    for (i, repo_list) in repo_id_details.iter().enumerate() {
-        let mut file = BufWriter::new(File::create(format!("repo_mappings_{:?}.txt", i)).expect("Couldn't open file for writing"));
-        for repo_id_detail in repo_list {
-            file.write_all(format!("{}\n", repo_id_detail.as_sql()).as_bytes()).expect("Couldn't write to file");
-        }
+fn repo_mappings_as_sql_to_s3(repo_id_details: &Vec<RepoIdToName>, i: &i64, year: &i32) {
+    let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
+    let client = S3Client::new(default_tls_client().unwrap(),
+                               DefaultCredentialsProvider::new().unwrap(),
+                               Region::UsEast1);
+
+    let mut sql_text = String::new();
+    let file_name = format!("rvh/{}/repo_mappings_{:010}.txt.gz", year, i);
+    for repo_id_detail in repo_id_details {
+        sql_text.push_str(&format!("{}\n", repo_id_detail.as_sql()));
+    }
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write(sql_text.as_bytes()).expect("encoding failed");
+    let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
+
+    let upload_request = PutObjectRequest {
+        bucket: dest_bucket.to_owned(),
+        key: file_name.to_owned(),
+        body: Some(compressed_results),
+        ..Default::default()
+    };
+
+    match client.put_object(&upload_request) {
+        Ok(_) => println!("uploaded {} to {}", file_name, dest_bucket),
+        Err(e) => {
+            println!("Failed to upload {} to {}: {:?}", file_name, dest_bucket, e);
+            // try again?
+        },
     }
 }
 
