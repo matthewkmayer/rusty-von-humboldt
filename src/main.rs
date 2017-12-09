@@ -79,11 +79,13 @@ fn repo_mappings_as_sql_to_s3(repo_id_details: &Vec<RepoIdToName>, i: &i64, year
                                DefaultCredentialsProvider::new().unwrap(),
                                Region::UsEast1);
 
-    let mut sql_text = String::new();
+
     let file_name = format!("rvh/{}/repo_mappings_{:010}.txt.gz", year, i);
-    for repo_id_detail in repo_id_details {
-        sql_text.push_str(&format!("{}\n", repo_id_detail.as_sql()));
-    }
+    let sql_text: String = repo_id_details
+        .par_iter()
+        .map(|item| format!("{}\n", item.as_sql()))
+        .collect::<Vec<String>>()
+        .join("");
 
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write(sql_text.as_bytes()).expect("encoding failed");
