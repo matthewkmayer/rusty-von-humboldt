@@ -7,7 +7,6 @@ use serde::de::{self, Deserialize, Deserializer};
 pub struct Actor {
     #[serde(default = "id_not_specified")]
     pub id: i64,
-    pub display_login: Option<String>,
     pub login: Option<String>,
 }
 
@@ -40,11 +39,36 @@ pub struct Payload {
 pub struct Event {
     #[serde(deserialize_with = "from_str")]
     pub id: i64,
+    // Actually a datetime, may need to adjust later
+    pub created_at: String,
     #[serde(rename = "type")]
     pub event_type: String,
     pub actor: Actor,
     pub repo: Repo,
     pub payload: Option<Payload>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ActorAttributes {
+    // Hopefully this login maps to the updated style of login
+    pub login: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Pre2015Event {
+    pub repo: Repo,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub actor: String,
+    pub actor_attributes: ActorAttributes,
+    // Actually a datetime, may need to adjust later
+    pub created_at: String,
+}
+
+// a pull request event is of "type": "PullRequestEvent" with payload.pull_request.merged == true
+// a push event is of type PushEvent
+impl Pre2015Event {
+    // impl is_accepted_pr and is_direct_push_event
 }
 
 impl Event {
@@ -54,7 +78,6 @@ impl Event {
             event_type: "n/a".to_string(),
             actor: Actor {
                 id: -1,
-                display_login: None,
                 login: None,
             },
             repo: Repo {
@@ -62,17 +85,11 @@ impl Event {
                 name: "n/a".to_string(),
             },
             payload: None,
+            created_at: "".to_string(),
         }
     }
 
-    // This case is covered by is_missing_data. Should we remove it?
-    pub fn is_temp_one(&self) -> bool{
-        if self.id == -1 && self.repo.id == -1 && self.actor.id == -1 {
-            return true;
-        }
-        false
-    }
-
+    // Also covers placeholder Events made in the constructor above
     pub fn is_missing_data(&self) -> bool{
         if self.id == -1 || self.repo.id == -1 || self.actor.id == -1 {
             return true;
