@@ -41,9 +41,8 @@ fn main() {
     let mut commits_accepted_to_repo: Vec<PrByActor> = Vec::new();
 
     let mut approx_files_seen: i64 = 0;
-    let mut i: i64 = 0;
     // split processing of file list here
-    for chunk in file_list.chunks(CHUNK_SIZE as usize) {
+    for (i, chunk) in file_list.chunks(CHUNK_SIZE as usize).enumerate() {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
         let event_subset = get_event_subset(chunk);
 
@@ -56,7 +55,6 @@ fn main() {
             commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
         }
         approx_files_seen += CHUNK_SIZE;
-        i += 1;
     }
 
     // In a bit of a half-baked state while we move repo ids to a database
@@ -73,7 +71,7 @@ fn main() {
     println!("This is Rusty von Humboldt, heading home.");
 }
 
-fn repo_mappings_as_sql_to_s3(repo_id_details: &Vec<RepoIdToName>, i: &i64, year: &i32) {
+fn repo_mappings_as_sql_to_s3(repo_id_details: &[RepoIdToName], i: &usize, year: &i32) {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     let client = S3Client::new(default_tls_client().unwrap(),
                                DefaultCredentialsProvider::new().unwrap(),
@@ -88,7 +86,7 @@ fn repo_mappings_as_sql_to_s3(repo_id_details: &Vec<RepoIdToName>, i: &i64, year
         .join("");
 
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write(sql_text.as_bytes()).expect("encoding failed");
+    encoder.write_all(sql_text.as_bytes()).expect("encoding failed");
     let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
 
     let upload_request = PutObjectRequest {
@@ -107,13 +105,13 @@ fn repo_mappings_as_sql_to_s3(repo_id_details: &Vec<RepoIdToName>, i: &i64, year
     }
 }
 
-fn print_committers_per_repo(commits_accepted_to_repo: &Vec<PrByActor>, repo_id_name_map: &BTreeMap<i64, String>) {
+fn print_committers_per_repo(commits_accepted_to_repo: &[PrByActor], repo_id_name_map: &BTreeMap<i64, String>) {
     let sw = Stopwatch::start_new();
-    display_actor_count_per_repo(&commits_accepted_to_repo, repo_id_name_map);
+    display_actor_count_per_repo(commits_accepted_to_repo, repo_id_name_map);
     println!("Tying repos to actors took {}ms", sw.elapsed_ms());
 }
 
-fn display_actor_count_per_repo(commits_accepted_to_repo: &Vec<PrByActor>, repo_id_name_map: &BTreeMap<i64, String>) {
+fn display_actor_count_per_repo(commits_accepted_to_repo: &[PrByActor], repo_id_name_map: &BTreeMap<i64, String>) {
     // for each repo, count accepted PRs and direct commits made
     let mut repo_actors_count: BTreeMap<i64, i32> = BTreeMap::new();
     for pr in commits_accepted_to_repo {
@@ -142,11 +140,11 @@ fn make_list() -> Vec<String> {
 fn get_event_subset(chunk: &[String]) -> Vec<Event> {
     chunk
         .par_iter()
-        .flat_map(|file_name| download_and_parse_file(&file_name).expect("Issue with file ingest"))
+        .flat_map(|file_name| download_and_parse_file(file_name).expect("Issue with file ingest"))
         .collect()
 }
 
-fn repo_id_to_name_mappings(events: &Vec<Event>) -> Vec<RepoIdToName> {
+fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
     events
         .par_iter()
         .map(|r| RepoIdToName {
@@ -157,7 +155,7 @@ fn repo_id_to_name_mappings(events: &Vec<Event>) -> Vec<RepoIdToName> {
         .collect()
 }
 
-fn committers_to_repo(events: &Vec<Event>) -> Vec<PrByActor> {
+fn committers_to_repo(events: &[Event]) -> Vec<PrByActor> {
     events
         .par_iter()
         .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
