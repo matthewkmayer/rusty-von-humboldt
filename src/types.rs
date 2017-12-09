@@ -52,8 +52,8 @@ pub struct Event {
     #[serde(deserialize_with = "from_str")]
     pub id: i64,
     // Actually a datetime, may need to adjust later
-    // EG: "created_at": "2013-01-01T12:00:17-08:00" for pre-2015
-    // "created_at": "2017-05-01T00:59:44Z" for post-2015
+    // EG: "created_at": "2013-01-01T12:00:17-08:00" for pre-2015 (rfc3339)
+    // "created_at": "2017-05-01T00:59:44Z" for post-2015 (UTC)
     pub created_at: String,
     #[serde(rename = "type")]
     pub event_type: String,
