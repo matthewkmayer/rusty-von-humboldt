@@ -124,7 +124,7 @@ fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
             let event_found: Event = match serde_json::from_str(&l.unwrap()) {
                 Ok(event) => event,
                 Err(err) => {
-                    println!("Found a weird line of json, got this error: {:?}", err);
+                    println!("Found a weird line of json, got this error: {:?}.", err);
                     // make a fake one to toss out later
                     return Event::new();
                 }
@@ -133,8 +133,9 @@ fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
         })
         .collect();
 
-    // We tossed in the fake events, don't pass them back up
-    events.retain(|event| !event.is_temp_one());
+    // We tossed in the fake events and ones missing data, don't pass them back up
+    events.retain(|event| !event.is_missing_data());
+    // This may not actually speed things up or reduce memory pressure. TODO: check if it does.
     events.shrink_to_fit();
 
     Ok(events)

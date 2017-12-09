@@ -5,6 +5,7 @@ use serde::de::{self, Deserialize, Deserializer};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
+    #[serde(default = "id_not_specified")]
     pub id: i64,
     pub display_login: Option<String>,
     pub login: Option<String>,
@@ -12,6 +13,7 @@ pub struct Actor {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Repo {
+    #[serde(default = "id_not_specified")]
     pub id: i64,
     pub name: String,
 }
@@ -63,8 +65,16 @@ impl Event {
         }
     }
 
+    // This case is covered by is_missing_data. Should we remove it?
     pub fn is_temp_one(&self) -> bool{
         if self.id == -1 && self.repo.id == -1 && self.actor.id == -1 {
+            return true;
+        }
+        false
+    }
+
+    pub fn is_missing_data(&self) -> bool{
+        if self.id == -1 || self.repo.id == -1 || self.actor.id == -1 {
             return true;
         }
         false
@@ -124,6 +134,10 @@ impl RepoIdToName {
             repo_name = self.repo_name,
             event_id = self.event_id).replace("\n", "")
     }
+}
+
+fn id_not_specified() -> i64 {
+    -1
 }
 
 fn from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
