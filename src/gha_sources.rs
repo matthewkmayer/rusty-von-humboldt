@@ -117,25 +117,16 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
     parse_ze_file(BufReader::new(decoder))
 }
 
-fn parse_ze_file<R: BufRead>(contents: R) -> Result<Vec<Event>, String> {
-    let mut events: Vec<Event> = contents
-        .lines()
-        .map(|l| {
-            let event_found: Event = match serde_json::from_str(&l.unwrap()) {
-                Ok(event) => event,
-                Err(err) => {
-                    println!("Found a weird line of json, got this error: {:?}", err);
-                    // make a fake one to toss out later
-                    return Event::new();
-                }
-            };
-            event_found
-        })
-        .collect();
-
-    // We tossed in the fake events, don't pass them back up
-    events.retain(|event| !event.is_temp_one());
-    events.shrink_to_fit();
+fn parse_ze_file<R: BufRead>(mut contents: R) -> Result<Vec<Event>, String> {
+    let mut events: Vec<Event> = Vec::new();
+    let mut line = String::new();
+    while contents.read_line(&mut line).unwrap() > 0 {
+        match serde_json::from_str(&line) {
+            Ok(event) => events.push(event),
+            Err(err) => println!("Found a weird line of json, got this error: {:?}.", err),
+        };
+        line.clear();
+    }
 
     Ok(events)
 }

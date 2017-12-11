@@ -3,15 +3,28 @@ use std::str::FromStr;
 
 use serde::de::{self, Deserialize, Deserializer};
 
+// Use case: for either pre-2015 or post-2015 object:
+// convert to RepoIdToName type
+// for each of those, generate upsert statements
+// upload that string to S3
+trait RepoEvent {
+    fn is_push_event_or_pr(&self) -> bool;
+    // convert to a proper time type?
+    fn timestamp(&self) -> String;
+    fn repo_name(&self) -> String;
+    fn to_upsert_statement(&self) -> String;
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
+    #[serde(default = "id_not_specified")]
     pub id: i64,
-    pub display_login: Option<String>,
     pub login: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Repo {
+    #[serde(default = "id_not_specified")]
     pub id: i64,
     pub name: String,
 }
@@ -38,11 +51,38 @@ pub struct Payload {
 pub struct Event {
     #[serde(deserialize_with = "from_str")]
     pub id: i64,
+    // Actually a datetime, may need to adjust later
+    // EG: "created_at": "2013-01-01T12:00:17-08:00" for pre-2015 (rfc3339)
+    // "created_at": "2017-05-01T00:59:44Z" for post-2015 (UTC)
+    pub created_at: String,
     #[serde(rename = "type")]
     pub event_type: String,
     pub actor: Actor,
     pub repo: Repo,
     pub payload: Option<Payload>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ActorAttributes {
+    // Hopefully this login maps to the updated style of login
+    pub login: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Pre2015Event {
+    pub repo: Repo,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub actor: String,
+    pub actor_attributes: ActorAttributes,
+    // Actually a datetime, may need to adjust later
+    pub created_at: String,
+}
+
+// a pull request event is of "type": "PullRequestEvent" with payload.pull_request.merged == true
+// a push event is of type PushEvent
+impl Pre2015Event {
+    // impl is_accepted_pr and is_direct_push_event
 }
 
 impl Event {
@@ -52,7 +92,6 @@ impl Event {
             event_type: "n/a".to_string(),
             actor: Actor {
                 id: -1,
-                display_login: None,
                 login: None,
             },
             repo: Repo {
@@ -60,11 +99,13 @@ impl Event {
                 name: "n/a".to_string(),
             },
             payload: None,
+            created_at: "".to_string(),
         }
     }
 
-    pub fn is_temp_one(&self) -> bool{
-        if self.id == -1 && self.repo.id == -1 && self.actor.id == -1 {
+    // Also covers placeholder Events made in the constructor above
+    pub fn is_missing_data(&self) -> bool{
+        if self.id == -1 || self.repo.id == -1 || self.actor.id == -1 {
             return true;
         }
         false
@@ -107,6 +148,7 @@ pub struct PrByActor {
 }
 
 // Let us figure out if there is a new name for the repo
+// TODO: pre-2015 events don't have event_id, switch that to the created_at timestamp
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct RepoIdToName {
     pub repo_id: i64,
@@ -124,6 +166,10 @@ impl RepoIdToName {
             repo_name = self.repo_name,
             event_id = self.event_id).replace("\n", "")
     }
+}
+
+fn id_not_specified() -> i64 {
+    -1
 }
 
 fn from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
