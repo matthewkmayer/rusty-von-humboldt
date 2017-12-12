@@ -143,13 +143,17 @@ pub struct RepoIdToName {
 // TODO: check the new timestamp way works
 impl RepoIdToName {
     pub fn as_sql(&self) -> String {
-        format!("INSERT INTO repo_mapping (repo_id, repo_name, event_id)
-            VALUES ({repo_id}, '{repo_name}', {event_id})
-            ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_id) = ('{repo_name}', {event_id})
-            WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_id < EXCLUDED.event_id;",
+        let sql = format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+            VALUES ({repo_id}, '{repo_name}', '{event_timestamp}')
+            ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = ('{repo_name}', '{event_timestamp}')
+            WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;",
             repo_id = self.repo_id,
             repo_name = self.repo_name,
-            event_id = self.event_timestamp).replace("\n", "")
+            event_timestamp = self.event_timestamp).replace("\n", "");
+
+        println!("\nsql is #{}\n", sql);
+
+        sql
     }
 }
 
