@@ -7,11 +7,8 @@ use serde::de::{self, Deserialize, Deserializer};
 // convert to RepoIdToName type
 // for each of those, generate upsert statements
 // upload that string to S3
-trait RepoEvent {
+pub trait RepoEvent {
     fn is_push_event_or_pr(&self) -> bool;
-    // convert to a proper time type?
-    fn timestamp(&self) -> String;
-    fn repo_name(&self) -> String;
     fn to_upsert_statement(&self) -> String;
 }
 
@@ -62,6 +59,15 @@ pub struct Event {
     pub payload: Option<Payload>,
 }
 
+impl RepoEvent for Event {
+    fn is_push_event_or_pr(&self) -> bool {
+        true
+    }
+    fn to_upsert_statement(&self) -> String {
+        "Totes real SQL trust me".to_string()
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ActorAttributes {
     // Hopefully this login maps to the updated style of login
@@ -81,8 +87,13 @@ pub struct Pre2015Event {
 
 // a pull request event is of "type": "PullRequestEvent" with payload.pull_request.merged == true
 // a push event is of type PushEvent
-impl Pre2015Event {
-    // impl is_accepted_pr and is_direct_push_event
+impl RepoEvent for Pre2015Event {
+    fn is_push_event_or_pr(&self) -> bool {
+        true
+    }
+    fn to_upsert_statement(&self) -> String {
+        "Totes real SQL trust me".to_string()
+    }
 }
 
 impl Event {

@@ -114,10 +114,32 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
         }
     };
     let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
-    parse_ze_file(BufReader::new(decoder))
+    // let year_to_process = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process").parse::<i64>().expect("Please set GHAYEAR to an integer value");
+
+    // if year_to_process < 2015 {
+        // parse_ze_file_pre_2015(BufReader::new(decoder))
+    // } else {
+    parse_ze_file_2015_older(BufReader::new(decoder))
+    // }
 }
 
-fn parse_ze_file<R: BufRead>(mut contents: R) -> Result<Vec<Event>, String> {
+// TODO: generic-ify
+// fn parse_ze_file_pre_2015<R: BufRead, T: RepoEvent>(mut contents: R) -> Result<Vec<Box<T>>, String> {
+//     // if 2014 or earlier, events is of Event
+//     let mut events: Vec<Box<T>> = Vec::new();
+//     let mut line = String::new();
+//     while contents.read_line(&mut line).unwrap() > 0 {
+//         match serde_json::from_str(&line)::<Event> {
+//             Ok(event) => events.push(event),
+//             Err(err) => println!("Found a weird line of json, got this error: {:?}.", err),
+//         };
+//         line.clear();
+//     }
+
+//     Ok(events)
+// }
+
+fn parse_ze_file_2015_older<R: BufRead>(mut contents: R) -> Result<Vec<Event>, String> {
     let mut events: Vec<Event> = Vec::new();
     let mut line = String::new();
     while contents.read_line(&mut line).unwrap() > 0 {
