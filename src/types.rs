@@ -3,15 +3,6 @@ use std::str::FromStr;
 
 use serde::de::{self, Deserialize, Deserializer};
 
-// Use case: for either pre-2015 or post-2015 object:
-// convert to RepoIdToName type
-// for each of those, generate upsert statements
-// upload that string to S3
-pub trait RepoEvent {
-    fn is_push_event_or_pr(&self) -> bool;
-    fn to_upsert_statement(&self) -> String;
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     #[serde(default = "id_not_specified")]
@@ -59,15 +50,6 @@ pub struct Event {
     pub payload: Option<Payload>,
 }
 
-impl RepoEvent for Event {
-    fn is_push_event_or_pr(&self) -> bool {
-        true
-    }
-    fn to_upsert_statement(&self) -> String {
-        "Totes real SQL trust me".to_string()
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ActorAttributes {
     // Hopefully this login maps to the updated style of login
@@ -83,17 +65,6 @@ pub struct Pre2015Event {
     pub actor_attributes: ActorAttributes,
     // Actually a datetime, may need to adjust later
     pub created_at: String,
-}
-
-// a pull request event is of "type": "PullRequestEvent" with payload.pull_request.merged == true
-// a push event is of type PushEvent
-impl RepoEvent for Pre2015Event {
-    fn is_push_event_or_pr(&self) -> bool {
-        true
-    }
-    fn to_upsert_statement(&self) -> String {
-        "Totes real SQL trust me".to_string()
-    }
 }
 
 impl Event {
@@ -164,7 +135,7 @@ pub struct PrByActor {
 pub struct RepoIdToName {
     pub repo_id: i64,
     pub repo_name: String,
-    pub event_id: i64,
+    pub event_timestamp: String,
 }
 
 impl RepoIdToName {
@@ -175,7 +146,7 @@ impl RepoIdToName {
             WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_id < EXCLUDED.event_id;",
             repo_id = self.repo_id,
             repo_name = self.repo_name,
-            event_id = self.event_id).replace("\n", "")
+            event_id = self.event_timestamp).replace("\n", "")
     }
 }
 

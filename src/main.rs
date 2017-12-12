@@ -36,9 +36,15 @@ fn main() {
     // split processing of file list here
     for (i, chunk) in file_list.chunks(CHUNK_SIZE as usize).enumerate() {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
-        let event_subset = get_event_subset(chunk);
+        
+        if year_to_process < 2015 {
+            let event_subset = get_old_event_subset(chunk);
+            repo_mappings_as_sql_to_s3(&repo_id_to_name_mappings_old(&event_subset), &i, &year_to_process);
+        } else {
+            let event_subset = get_event_subset(chunk);
+            repo_mappings_as_sql_to_s3(&repo_id_to_name_mappings(&event_subset), &i, &year_to_process);
+        }
 
-        repo_mappings_as_sql_to_s3(&repo_id_to_name_mappings(&event_subset), &i, &year_to_process);
         approx_files_seen += CHUNK_SIZE;
     }
 
@@ -87,6 +93,7 @@ fn make_list() -> Vec<String> {
     file_list
 }
 
+// another one for get_old_event_subset?
 fn get_event_subset(chunk: &[String]) -> Vec<Event> {
     chunk
         .par_iter()
@@ -94,20 +101,32 @@ fn get_event_subset(chunk: &[String]) -> Vec<Event> {
         .collect()
 }
 
+fn get_old_event_subset(chunk: &[String]) -> Vec<Pre2015Event> {
+    chunk
+        .par_iter()
+        .flat_map(|file_name| download_and_parse_old_file(file_name).expect("Issue with file ingest"))
+        .collect()
+}
+
+fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
+    events
+        .par_iter()
+        .map(|r| RepoIdToName {
+                repo_id: r.repo.id,
+                repo_name: r.repo.name.clone(),
+                event_timestamp: r.created_at.clone(),
+            })
+        .collect()
+}
+
+
 fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
     events
         .par_iter()
         .map(|r| RepoIdToName {
                 repo_id: r.repo.id,
                 repo_name: r.repo.name.clone(),
-                event_id: r.id
+                event_timestamp: r.created_at.clone(),
             })
         .collect()
 }
-
-// fn committers_to_repo(events: &[Event]) -> Vec<PrByActor> {
-//     events
-//         .par_iter()
-//         .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
-//         .collect()
-// }
