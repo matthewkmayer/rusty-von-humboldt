@@ -19,12 +19,12 @@ use flate2::write::GzEncoder;
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
-use rusoto_core::{DefaultCredentialsProvider, Region, default_tls_client};
+use rusoto_core::{DefaultCredentialsProviderSync, Region, default_tls_client, ProvideAwsCredentials, DispatchSignedRequest};
 use rusoto_s3::{S3, S3Client, PutObjectRequest};
 
 // Chunk size controls size of output files and roughly the amount of parallelism
 // when downloading and deserializing files.
-const CHUNK_SIZE: i64 = 50;
+const CHUNK_SIZE: i64 = 120;
 
 #[derive(Debug, Clone)]
 struct WorkItem {
@@ -37,7 +37,7 @@ struct WorkItem {
 fn compressor_work(receiver: Receiver<WorkItem>) {
     println!("Compressor work thread fired up.");
     let client = S3Client::new(default_tls_client().unwrap(),
-        DefaultCredentialsProvider::new().unwrap(),
+        DefaultCredentialsProviderSync::new().unwrap(),
         Region::UsEast1);
     loop {
         let work_item: WorkItem = receiver.recv().unwrap();
@@ -60,14 +60,8 @@ fn compressor_work(receiver: Receiver<WorkItem>) {
             Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
             Err(e) => {
                 println!("Failed to upload {} to {}: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
-                thread::sleep(time::Duration::from_millis(5000));
-                let upload_request2 = PutObjectRequest {
-                    bucket: work_item.s3_bucket_name.to_owned(),
-                    key: work_item.s3_file_location.to_owned(),
-                    body: Some(compressed_results),
-                    ..Default::default()
-                };
-                match client.put_object(&upload_request2) {
+                thread::sleep(time::Duration::from_millis(8000));
+                match client.put_object(&upload_request) {
                     Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
                     Err(e) => {
                         println!("Failed to upload {} to {}, second attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
@@ -83,12 +77,12 @@ fn main() {
     println!("Welcome to Rusty von Humboldt.");
 
     // We'll need more than two threads for this!
-    let (sender_a, receiver_a) = sync_channel(5);
+    let (sender_a, receiver_a) = sync_channel(2);
     let compressor_thread_a = thread::spawn(move|| {
         compressor_work(receiver_a);
     });
     
-    let (sender_b, receiver_b) = sync_channel(10);
+    let (sender_b, receiver_b) = sync_channel(2);
     let compressor_thread_b = thread::spawn(move|| {
         compressor_work(receiver_b);
     });
@@ -100,12 +94,16 @@ fn main() {
     let mut approx_files_seen: i64 = 0;
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // split processing of file list here
+    let client = S3Client::new(default_tls_client().unwrap(),
+        DefaultCredentialsProviderSync::new().unwrap(),
+        Region::UsEast1);
+    
     for (i, chunk) in file_list.chunks(CHUNK_SIZE as usize).enumerate() {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
         let file_name = format!("rvh/{}/repo_mappings_{:010}.txt.gz", year_to_process, i);
-        // share an s3 client?
         if year_to_process < 2015 {
-            let event_subset = get_old_event_subset(chunk);
+            // change get_old_event_subset to only fetch x number of files?
+            let event_subset = get_old_event_subset(chunk, &client);
             let sql = repo_id_to_name_mappings_old(&event_subset)
                 .par_iter()
                 .map(|item| format!("{}\n", item.as_sql()))
@@ -126,7 +124,7 @@ fn main() {
                 Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
             };
         } else {
-            let event_subset = get_event_subset(chunk);
+            let event_subset = get_event_subset(chunk, &client);
             let sql = repo_id_to_name_mappings(&event_subset)
                 .par_iter()
                 .map(|item| format!("{}\n", item.as_sql()))
@@ -184,19 +182,21 @@ fn make_list() -> Vec<String> {
     file_list
 }
 
-fn get_event_subset(chunk: &[String]) -> Vec<Event> {
+fn get_event_subset<P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>(chunk: &[String], client: &S3Client<P, D>) -> Vec<Event> {
     chunk
         .par_iter()
         // todo: don't panic here
-        .flat_map(|file_name| download_and_parse_file(file_name).expect("Issue with file ingest"))
+        .flat_map(|file_name| download_and_parse_file(file_name, &client).expect("Issue with file ingest"))
         .collect()
 }
 
-fn get_old_event_subset(chunk: &[String]) -> Vec<Pre2015Event> {
+fn get_old_event_subset<P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>(chunk: &[String], client: &S3Client<P, D>) -> Vec<Pre2015Event> {
     chunk
         .par_iter()
         // todo: don't panic here
-        .flat_map(|file_name| download_and_parse_old_file(file_name).expect("Issue with file ingest"))
+        .flat_map(|file_name| download_and_parse_old_file(file_name, &client).expect("Issue with file ingest"))
         .collect()
 }
 
