@@ -11,8 +11,8 @@ extern crate rand;
 
 use std::io::prelude::*;
 use std::env;
-use std::thread;
 use std::sync::mpsc::{sync_channel, Receiver};
+use std::{thread, time};
 use rayon::prelude::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -24,7 +24,7 @@ use rusoto_s3::{S3, S3Client, PutObjectRequest};
 
 // Chunk size controls size of output files and roughly the amount of parallelism
 // when downloading and deserializing files.
-const CHUNK_SIZE: i64 = 30;
+const CHUNK_SIZE: i64 = 50;
 
 #[derive(Debug, Clone)]
 struct WorkItem {
@@ -52,7 +52,7 @@ fn compressor_work(receiver: Receiver<WorkItem>) {
         let upload_request = PutObjectRequest {
             bucket: work_item.s3_bucket_name.to_owned(),
             key: work_item.s3_file_location.to_owned(),
-            body: Some(compressed_results),
+            body: Some(compressed_results.clone()),
             ..Default::default()
         };
 
@@ -60,8 +60,20 @@ fn compressor_work(receiver: Receiver<WorkItem>) {
             Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
             Err(e) => {
                 println!("Failed to upload {} to {}: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
-                // try again?
-            },
+                thread::sleep(time::Duration::from_millis(5000));
+                let upload_request2 = PutObjectRequest {
+                    bucket: work_item.s3_bucket_name.to_owned(),
+                    key: work_item.s3_file_location.to_owned(),
+                    body: Some(compressed_results),
+                    ..Default::default()
+                };
+                match client.put_object(&upload_request2) {
+                    Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
+                    Err(e) => {
+                        println!("Failed to upload {} to {}, second attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
+                    },
+                };
+            }
         }
     }
     println!("Compressor work thread all done.");
@@ -70,12 +82,13 @@ fn compressor_work(receiver: Receiver<WorkItem>) {
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
 
+    // We'll need more than two threads for this!
     let (sender_a, receiver_a) = sync_channel(5);
     let compressor_thread_a = thread::spawn(move|| {
         compressor_work(receiver_a);
     });
     
-    let (sender_b, receiver_b) = sync_channel(5);
+    let (sender_b, receiver_b) = sync_channel(10);
     let compressor_thread_b = thread::spawn(move|| {
         compressor_work(receiver_b);
     });
@@ -90,6 +103,7 @@ fn main() {
     for (i, chunk) in file_list.chunks(CHUNK_SIZE as usize).enumerate() {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
         let file_name = format!("rvh/{}/repo_mappings_{:010}.txt.gz", year_to_process, i);
+        // share an s3 client?
         if year_to_process < 2015 {
             let event_subset = get_old_event_subset(chunk);
             let sql = repo_id_to_name_mappings_old(&event_subset)
