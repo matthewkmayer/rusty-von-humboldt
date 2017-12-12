@@ -88,6 +88,35 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
     files
 }
 
+pub fn download_and_parse_old_file(file_on_s3: &str) -> Result<Vec<Pre2015Event>, String> {
+    let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
+    let client = S3Client::new(default_tls_client().unwrap(),
+                               DefaultCredentialsProvider::new().unwrap(),
+                               Region::UsEast1);
+
+    let get_req = GetObjectRequest {
+        bucket: bucket.to_owned(),
+        key: file_on_s3.to_owned(),
+        ..Default::default()
+    };
+
+    let result = match client.get_object(&get_req) {
+        Ok(s3_result) => s3_result,
+        Err(err) => {
+            println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            match client.get_object(&get_req) {
+                Ok(s3_result) => s3_result,
+                Err(err) => {
+                    println!("Failed to get {:?} from S3, second attempt.", file_on_s3);
+                    return Err(format!("{:?}", err));
+                },
+            }
+        }
+    };
+    let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
+    parse_ze_file_2014_older(BufReader::new(decoder))
+}
+
 pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
     let client = S3Client::new(default_tls_client().unwrap(),
@@ -114,10 +143,25 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
         }
     };
     let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
-    parse_ze_file(BufReader::new(decoder))
+    parse_ze_file_2015_newer(BufReader::new(decoder))
 }
 
-fn parse_ze_file<R: BufRead>(mut contents: R) -> Result<Vec<Event>, String> {
+
+fn parse_ze_file_2014_older<R: BufRead>(mut contents: R) -> Result<Vec<Pre2015Event>, String> {
+    let mut events: Vec<Pre2015Event> = Vec::new();
+    let mut line = String::new();
+    while contents.read_line(&mut line).unwrap() > 0 {
+        match serde_json::from_str(&line) {
+            Ok(event) => events.push(event),
+            Err(err) => println!("Found a weird line of json, got this error: {:?}.", err),
+        };
+        line.clear();
+    }
+
+    Ok(events)
+}
+
+fn parse_ze_file_2015_newer<R: BufRead>(mut contents: R) -> Result<Vec<Event>, String> {
     let mut events: Vec<Event> = Vec::new();
     let mut line = String::new();
     while contents.read_line(&mut line).unwrap() > 0 {

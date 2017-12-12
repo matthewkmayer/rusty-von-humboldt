@@ -9,13 +9,9 @@ extern crate rusoto_s3;
 extern crate flate2;
 extern crate rand;
 
-use std::collections::BTreeMap;
-use std::fs::File;
 use std::io::prelude::*;
-use std::io::BufWriter;
 use std::env;
 use rayon::prelude::*;
-use stopwatch::Stopwatch;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
@@ -34,38 +30,22 @@ fn main() {
     env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     let year_to_process: i32 = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process").parse::<i32>().expect("Please set GHAYEAR to an integer value");;
 
-    let do_committer_counts = false;
     let file_list = make_list();
-
-    let mut sw = Stopwatch::start_new();
-    let mut commits_accepted_to_repo: Vec<PrByActor> = Vec::new();
 
     let mut approx_files_seen: i64 = 0;
     // split processing of file list here
     for (i, chunk) in file_list.chunks(CHUNK_SIZE as usize).enumerate() {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
-        let event_subset = get_event_subset(chunk);
-
-        repo_mappings_as_sql_to_s3(&repo_id_to_name_mappings(&event_subset), &i, &year_to_process);
-
-        if do_committer_counts {
-            let mut this_chunk_commits_accepted_to_repo: Vec<PrByActor> = committers_to_repo(&event_subset);
-            this_chunk_commits_accepted_to_repo.sort();
-            this_chunk_commits_accepted_to_repo.dedup();
-            commits_accepted_to_repo.append(&mut this_chunk_commits_accepted_to_repo);
+        
+        if year_to_process < 2015 {
+            let event_subset = get_old_event_subset(chunk);
+            repo_mappings_as_sql_to_s3(&repo_id_to_name_mappings_old(&event_subset), &i, &year_to_process);
+        } else {
+            let event_subset = get_event_subset(chunk);
+            repo_mappings_as_sql_to_s3(&repo_id_to_name_mappings(&event_subset), &i, &year_to_process);
         }
+
         approx_files_seen += CHUNK_SIZE;
-    }
-
-    // In a bit of a half-baked state while we move repo ids to a database
-    if do_committer_counts {
-        sw.restart();
-        commits_accepted_to_repo.sort();
-        commits_accepted_to_repo.dedup();
-
-        let repo_id_name_map: BTreeMap<i64, String> = BTreeMap::new();
-        print_committers_per_repo(&commits_accepted_to_repo, &repo_id_name_map);
-        println!("\nprint_committers_per_repo took {}ms\n", sw.elapsed_ms());
     }
 
     println!("This is Rusty von Humboldt, heading home.");
@@ -105,30 +85,6 @@ fn repo_mappings_as_sql_to_s3(repo_id_details: &[RepoIdToName], i: &usize, year:
     }
 }
 
-fn print_committers_per_repo(commits_accepted_to_repo: &[PrByActor], repo_id_name_map: &BTreeMap<i64, String>) {
-    let sw = Stopwatch::start_new();
-    display_actor_count_per_repo(commits_accepted_to_repo, repo_id_name_map);
-    println!("Tying repos to actors took {}ms", sw.elapsed_ms());
-}
-
-fn display_actor_count_per_repo(commits_accepted_to_repo: &[PrByActor], repo_id_name_map: &BTreeMap<i64, String>) {
-    // for each repo, count accepted PRs and direct commits made
-    let mut repo_actors_count: BTreeMap<i64, i32> = BTreeMap::new();
-    for pr in commits_accepted_to_repo {
-        *repo_actors_count.entry(pr.repo.id).or_insert(0) += 1;
-    }
-
-    // match repo ids to their current names:
-    let mut repo_name_and_actors: BTreeMap<Repo, i32>= BTreeMap::new();
-    for (repo_id, actor_count) in repo_actors_count {
-        repo_name_and_actors.insert(Repo {id: repo_id, name: repo_id_name_map.get(&repo_id).expect("repo name should be present").to_string()}, actor_count);
-    }
-
-    // println!("\nrepo_name_and_actors: {:#?}", repo_name_and_actors);
-    let mut file = BufWriter::new(File::create("commiter_count.txt").expect("Couldn't open file for writing"));
-    file.write_all(format!("{:#?}", repo_name_and_actors).as_bytes()).expect("Couldn't write to file");
-}
-
 fn make_list() -> Vec<String> {
     let mut file_list = construct_list_of_ingest_files();
     let mut rng = thread_rng();
@@ -144,20 +100,51 @@ fn get_event_subset(chunk: &[String]) -> Vec<Event> {
         .collect()
 }
 
+fn get_old_event_subset(chunk: &[String]) -> Vec<Pre2015Event> {
+    chunk
+        .par_iter()
+        .flat_map(|file_name| download_and_parse_old_file(file_name).expect("Issue with file ingest"))
+        .collect()
+}
+
+fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
+    events
+        .par_iter()
+        .map(|r| {
+            let repo_id = match r.repo {
+                Some(ref repo) => repo.id,
+                None => match r.repository {
+                    Some(ref repository) => repository.id,
+                    None => -1, // TODO: somehow ignore this event, as we can't use it
+                }
+            };
+            let repo_name = match r.repo {
+                Some(ref repo) => repo.name.clone(),
+                None => match r.repository {
+                    Some(ref repository) => repository.name.clone(),
+                    None => "".to_string(),
+                }
+            };
+
+            RepoIdToName {
+                    repo_id: repo_id,
+                    repo_name: repo_name,
+                    event_timestamp: r.created_at.clone(),
+                }
+            }
+        )
+        .collect()
+        
+}
+
+
 fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
     events
         .par_iter()
         .map(|r| RepoIdToName {
                 repo_id: r.repo.id,
                 repo_name: r.repo.name.clone(),
-                event_id: r.id
+                event_timestamp: r.created_at.clone(),
             })
-        .collect()
-}
-
-fn committers_to_repo(events: &[Event]) -> Vec<PrByActor> {
-    events
-        .par_iter()
-        .map(|event| PrByActor { repo: event.repo.clone(), actor: event.actor.clone(), } )
         .collect()
 }

@@ -3,18 +3,6 @@ use std::str::FromStr;
 
 use serde::de::{self, Deserialize, Deserializer};
 
-// Use case: for either pre-2015 or post-2015 object:
-// convert to RepoIdToName type
-// for each of those, generate upsert statements
-// upload that string to S3
-trait RepoEvent {
-    fn is_push_event_or_pr(&self) -> bool;
-    // convert to a proper time type?
-    fn timestamp(&self) -> String;
-    fn repo_name(&self) -> String;
-    fn to_upsert_statement(&self) -> String;
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     #[serde(default = "id_not_specified")]
@@ -64,25 +52,21 @@ pub struct Event {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ActorAttributes {
-    // Hopefully this login maps to the updated style of login
     pub login: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Pre2015Event {
-    pub repo: Repo,
+    // sometimes called repository because why not?
+    pub repository: Option<Repo>,
+    pub repo: Option<Repo>,
     #[serde(rename = "type")]
     pub event_type: String,
-    pub actor: String,
-    pub actor_attributes: ActorAttributes,
+    // sometimes this is a struct, sometimes it's a string
+    // pub actor: Actor,
+    // pub actor_attributes: ActorAttributes
     // Actually a datetime, may need to adjust later
     pub created_at: String,
-}
-
-// a pull request event is of "type": "PullRequestEvent" with payload.pull_request.merged == true
-// a push event is of type PushEvent
-impl Pre2015Event {
-    // impl is_accepted_pr and is_direct_push_event
 }
 
 impl Event {
@@ -148,23 +132,28 @@ pub struct PrByActor {
 }
 
 // Let us figure out if there is a new name for the repo
-// TODO: pre-2015 events don't have event_id, switch that to the created_at timestamp
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct RepoIdToName {
     pub repo_id: i64,
     pub repo_name: String,
-    pub event_id: i64,
+    pub event_timestamp: String,
 }
 
 impl RepoIdToName {
     pub fn as_sql(&self) -> String {
-        format!("INSERT INTO repo_mapping (repo_id, repo_name, event_id)
-            VALUES ({repo_id}, '{repo_name}', {event_id})
-            ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_id) = ('{repo_name}', {event_id})
-            WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_id < EXCLUDED.event_id;",
+        // Sometimes bad data can still get to here, skip if we don't have all the data required.
+        if self.repo_id == -1 || self.repo_name == "" {
+            return "".to_string();
+        }
+        let sql = format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+            VALUES ({repo_id}, '{repo_name}', '{event_timestamp}')
+            ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = ('{repo_name}', '{event_timestamp}')
+            WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;",
             repo_id = self.repo_id,
             repo_name = self.repo_name,
-            event_id = self.event_id).replace("\n", "")
+            event_timestamp = self.event_timestamp).replace("\n", "");
+
+        sql
     }
 }
 
