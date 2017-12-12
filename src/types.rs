@@ -52,17 +52,19 @@ pub struct Event {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ActorAttributes {
-    // Hopefully this login maps to the updated style of login
     pub login: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Pre2015Event {
-    pub repo: Repo,
+    // sometimes called repository because why not?
+    pub repository: Option<Repo>,
+    pub repo: Option<Repo>,
     #[serde(rename = "type")]
     pub event_type: String,
-    pub actor: String,
-    pub actor_attributes: ActorAttributes,
+    // sometimes this is a struct, sometimes it's a string
+    // pub actor: Actor,
+    // pub actor_attributes: ActorAttributes
     // Actually a datetime, may need to adjust later
     pub created_at: String,
 }
@@ -138,6 +140,7 @@ pub struct RepoIdToName {
     pub event_timestamp: String,
 }
 
+// TODO: check the new timestamp way works
 impl RepoIdToName {
     pub fn as_sql(&self) -> String {
         format!("INSERT INTO repo_mapping (repo_id, repo_name, event_id)

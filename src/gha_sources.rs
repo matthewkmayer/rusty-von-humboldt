@@ -114,7 +114,6 @@ pub fn download_and_parse_old_file(file_on_s3: &str) -> Result<Vec<Pre2015Event>
         }
     };
     let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
-    // let year_to_process = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process").parse::<i64>().expect("Please set GHAYEAR to an integer value");
     parse_ze_file_2014_older(BufReader::new(decoder))
 }
 
@@ -144,7 +143,6 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
         }
     };
     let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
-    // let year_to_process = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process").parse::<i64>().expect("Please set GHAYEAR to an integer value");
     parse_ze_file_2015_newer(BufReader::new(decoder))
 }
 

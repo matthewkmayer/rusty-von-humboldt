@@ -93,7 +93,6 @@ fn make_list() -> Vec<String> {
     file_list
 }
 
-// another one for get_old_event_subset?
 fn get_event_subset(chunk: &[String]) -> Vec<Event> {
     chunk
         .par_iter()
@@ -111,12 +110,31 @@ fn get_old_event_subset(chunk: &[String]) -> Vec<Pre2015Event> {
 fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
     events
         .par_iter()
-        .map(|r| RepoIdToName {
-                repo_id: r.repo.id,
-                repo_name: r.repo.name.clone(),
-                event_timestamp: r.created_at.clone(),
-            })
+        .map(|r| {
+            let repo_id = match r.repo {
+                Some(ref repo) => repo.id,
+                None => match r.repository {
+                    Some(ref repository) => repository.id,
+                    None => -1,
+                }
+            };
+            let repo_name = match r.repo {
+                Some(ref repo) => repo.name.clone(),
+                None => match r.repository {
+                    Some(ref repository) => repository.name.clone(),
+                    None => "".to_string(),
+                }
+            };
+
+            RepoIdToName {
+                    repo_id: repo_id,
+                    repo_name: repo_name,
+                    event_timestamp: r.created_at.clone(),
+                }
+            }
+        )
         .collect()
+        
 }
 
 
