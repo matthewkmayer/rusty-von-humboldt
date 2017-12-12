@@ -24,9 +24,9 @@ use rusoto_s3::{S3, S3Client, PutObjectRequest};
 
 // Chunk size controls size of output files and roughly the amount of parallelism
 // when downloading and deserializing files.
-const CHUNK_SIZE: i64 = 24;
+const CHUNK_SIZE: i64 = 30;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WorkItem {
     sql: String,
     s3_bucket_name: String,
@@ -36,15 +36,14 @@ struct WorkItem {
 
 fn compressor_work(receiver: Receiver<WorkItem>) {
     println!("Compressor work thread fired up.");
+    let client = S3Client::new(default_tls_client().unwrap(),
+        DefaultCredentialsProvider::new().unwrap(),
+        Region::UsEast1);
     loop {
         let work_item: WorkItem = receiver.recv().unwrap();
         if work_item.no_more_work {
             break;
         }
-
-        let client = S3Client::new(default_tls_client().unwrap(),
-                                DefaultCredentialsProvider::new().unwrap(),
-                                Region::UsEast1);
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(work_item.sql.as_bytes()).expect("encoding failed");
@@ -71,11 +70,16 @@ fn compressor_work(receiver: Receiver<WorkItem>) {
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
 
-    let (sender, receiver) = sync_channel(2);
-    let compressor_thread = thread::spawn(move|| {
-        compressor_work(receiver);
+    let (sender_a, receiver_a) = sync_channel(5);
+    let compressor_thread_a = thread::spawn(move|| {
+        compressor_work(receiver_a);
     });
     
+    let (sender_b, receiver_b) = sync_channel(5);
+    let compressor_thread_b = thread::spawn(move|| {
+        compressor_work(receiver_b);
+    });
+
     let year_to_process: i32 = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process").parse::<i32>().expect("Please set GHAYEAR to an integer value");;
 
     let file_list = make_list();
@@ -100,7 +104,13 @@ fn main() {
                 s3_file_location: file_name,
                 no_more_work: false,
             };
-            sender.send(workitem).expect("Channel send no worky");
+            // try_send into first queue: if error, put into second queue
+            // ugh
+            let workitem_copy = workitem.clone();
+            match sender_a.try_send(workitem) {
+                Ok(_) => (),
+                Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
+            };
         } else {
             let event_subset = get_event_subset(chunk);
             let sql = repo_id_to_name_mappings(&event_subset)
@@ -115,7 +125,12 @@ fn main() {
                 s3_file_location: file_name,
                 no_more_work: false,
             };
-            sender.send(workitem).expect("Channel send no worky");
+            // try_send into first queue: if error, put into second queue
+            let workitem_copy = workitem.clone();
+            match sender_a.try_send(workitem) {
+                Ok(_) => (),
+                Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
+            };
         }
 
         approx_files_seen += CHUNK_SIZE;
@@ -127,8 +142,19 @@ fn main() {
         s3_file_location: String::new(),
         no_more_work: true,
     };
-    sender.send(final_workitem).expect("Channel wrapup send no worky");
-    match compressor_thread.join() {
+    sender_a.send(final_workitem).expect("Channel wrapup send no worky");
+    let final_workitem = WorkItem {
+        sql: String::new(),
+        s3_bucket_name: String::new(),
+        s3_file_location: String::new(),
+        no_more_work: true,
+    };
+    sender_b.send(final_workitem).expect("Channel wrapup send no worky");
+    match compressor_thread_a.join() {
+        Ok(_) => println!("Compressor thread all wrapped up."),
+        Err(e) => println!("Compressor thread didn't want to quit: {:?}", e),
+    }
+    match compressor_thread_b.join() {
         Ok(_) => println!("Compressor thread all wrapped up."),
         Err(e) => println!("Compressor thread didn't want to quit: {:?}", e),
     }
@@ -147,6 +173,7 @@ fn make_list() -> Vec<String> {
 fn get_event_subset(chunk: &[String]) -> Vec<Event> {
     chunk
         .par_iter()
+        // todo: don't panic here
         .flat_map(|file_name| download_and_parse_file(file_name).expect("Issue with file ingest"))
         .collect()
 }
@@ -154,6 +181,7 @@ fn get_event_subset(chunk: &[String]) -> Vec<Event> {
 fn get_old_event_subset(chunk: &[String]) -> Vec<Pre2015Event> {
     chunk
         .par_iter()
+        // todo: don't panic here
         .flat_map(|file_name| download_and_parse_old_file(file_name).expect("Issue with file ingest"))
         .collect()
 }

@@ -7,6 +7,7 @@ extern crate flate2;
 
 use std::io::{BufReader, BufRead};
 use std::env;
+use std::{thread, time};
 use rusoto_core::{DefaultCredentialsProvider, Region, default_tls_client};
 use rusoto_s3::{S3, S3Client, ListObjectsV2Request, GetObjectRequest};
 use self::flate2::read::GzDecoder;
@@ -104,6 +105,8 @@ pub fn download_and_parse_old_file(file_on_s3: &str) -> Result<Vec<Pre2015Event>
         Ok(s3_result) => s3_result,
         Err(err) => {
             println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            let three_seconds = time::Duration::from_millis(3000);
+            thread::sleep(three_seconds);
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
                 Err(err) => {
@@ -133,6 +136,8 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
         Ok(s3_result) => s3_result,
         Err(err) => {
             println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            let three_seconds = time::Duration::from_millis(3000);
+            thread::sleep(three_seconds);
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
                 Err(err) => {
