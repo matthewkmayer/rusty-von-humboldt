@@ -132,7 +132,6 @@ pub struct PrByActor {
 }
 
 // Let us figure out if there is a new name for the repo
-// TODO: pre-2015 events don't have event_id, switch that to the created_at timestamp
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct RepoIdToName {
     pub repo_id: i64,
@@ -140,9 +139,12 @@ pub struct RepoIdToName {
     pub event_timestamp: String,
 }
 
-// TODO: check the new timestamp way works
 impl RepoIdToName {
     pub fn as_sql(&self) -> String {
+        // Sometimes bad data can still get to here, skip if we don't have all the data required.
+        if self.repo_id == -1 || self.repo_name == "" {
+            return "".to_string();
+        }
         let sql = format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
             VALUES ({repo_id}, '{repo_name}', '{event_timestamp}')
             ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = ('{repo_name}', '{event_timestamp}')
@@ -150,8 +152,6 @@ impl RepoIdToName {
             repo_id = self.repo_id,
             repo_name = self.repo_name,
             event_timestamp = self.event_timestamp).replace("\n", "");
-
-        println!("\nsql is #{}\n", sql);
 
         sql
     }

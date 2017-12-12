@@ -115,7 +115,7 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 Some(ref repo) => repo.id,
                 None => match r.repository {
                     Some(ref repository) => repository.id,
-                    None => -1,
+                    None => -1, // TODO: somehow ignore this event, as we can't use it
                 }
             };
             let repo_name = match r.repo {
