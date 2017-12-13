@@ -91,12 +91,18 @@ fn main() {
             if year_to_process < 2015 {
                 // change get_old_event_subset to only fetch x number of files?
                 let event_subset = get_old_event_subset_committers(chunk, &client);
-                let sql = "hi mom".to_string();
-                // let sql = repo_id_to_name_mappings_old(&event_subset)
-                //     .par_iter()
-                //     .map(|item| format!("{}\n", item.as_sql()))
-                //     .collect::<Vec<String>>()
-                //     .join("");
+                let mut committer_events: Vec<CommitEvent> = event_subset
+                    .par_iter()
+                    .map(|item| item.as_commit_event())
+                    .collect();
+                committer_events.sort();
+                committer_events.dedup();
+
+                let sql = committer_events
+                    .par_iter()
+                    .map(|item| format!("{}\n", item.as_sql()))
+                    .collect::<Vec<String>>()
+                    .join("");
 
                 let workitem = WorkItem {
                     sql: sql,
@@ -293,6 +299,7 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
     events
         .par_iter()
         .map(|r| {
+            // replace with r.repo_id():
             let repo_id = match r.repo {
                 Some(ref repo) => repo.id,
                 None => match r.repository {

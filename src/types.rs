@@ -3,6 +3,32 @@ use std::str::FromStr;
 
 use serde::de::{self, Deserialize, Deserializer};
 
+#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct CommitEvent {
+    pub actor: String,
+    pub repo_id: i64,
+}
+
+impl CommitEvent {
+    pub fn as_sql(&self) -> String {
+        // Sometimes bad data can still get to here, skip if we don't have all the data required.
+        if self.repo_id == -1 || self.actor == "" {
+            return "".to_string();
+        }
+        // TODO: implement:
+        // let sql = format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+        //     VALUES ({repo_id}, '{repo_name}', '{event_timestamp}')
+        //     ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = ('{repo_name}', '{event_timestamp}')
+        //     WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;",
+        //     repo_id = self.repo_id,
+        //     repo_name = self.repo_name,
+        //     event_timestamp = self.event_timestamp).replace("\n", "");
+
+        // sql
+        "TODO".to_string()
+    }
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     #[serde(default = "id_not_specified")]
@@ -68,7 +94,7 @@ pub struct OldPayload {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Pre2015Event {
-    // sometimes called repository because why not?
+    // sometimes called repository
     pub repository: Option<Repo>,
     pub repo: Option<Repo>,
     #[serde(rename = "type")]
@@ -76,7 +102,6 @@ pub struct Pre2015Event {
     // sometimes this is a struct, sometimes it's a string
     // pub actor: Actor,
     // pub actor_attributes: ActorAttributes
-    // Actually a datetime, may need to adjust later
     pub created_at: String,
     pub payload: Option<OldPayload>,
 }
@@ -86,13 +111,35 @@ impl Pre2015Event {
         self.is_accepted_pr() || self.is_direct_push_event()
     }
 
+    pub fn as_commit_event(&self) -> CommitEvent {
+        CommitEvent {
+            actor: "foo".to_string(),
+            repo_id: self.repo_id(),
+        }
+    }
+
+    pub fn actor_name(&self) -> String {
+        "TODO".to_string()
+    }
+
+    pub fn repo_id(&self) -> i64 {
+        let repo_id = match self.repo {
+            Some(ref repo) => repo.id,
+            None => match self.repository {
+                Some(ref repository) => repository.id,
+                None => -1, // TODO: somehow ignore this event, as we can't use it
+            }
+        };
+        repo_id
+    }
+
     pub fn is_accepted_pr(&self) -> bool {
         if self.event_type != "PullRequestEvent" {
             return false;
         }
         match self.payload {
             Some(ref payload) => match payload.pull_request {
-                Some(ref pr) => pr.merged,
+                Some(ref pr) => pr.merged, // TODO: 2011 or so events don't have this.
                 None => false,
             },
             None => false,
