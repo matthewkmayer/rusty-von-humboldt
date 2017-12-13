@@ -1,33 +1,57 @@
 use std::fmt::Display;
 use std::str::FromStr;
-
 use serde::de::{self, Deserialize, Deserializer};
+use serde_json::Value;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+// TODO: sort file as source event types then mapped types.
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct CommitEvent {
+    pub actor: String,
+    pub repo_id: i64,
+}
+
+impl CommitEvent {
+    pub fn as_sql(&self) -> String {
+        // Sometimes bad data can still get to here, skip if we don't have all the data required.
+        if self.repo_id == -1 || self.actor == "" {
+            return "".to_string();
+        }
+        let sql = format!("INSERT INTO committer_repo_id_names (repo_id, actor_name)
+            VALUES ({repo_id}, '{actor_name}')
+            ON CONFLICT DO NOTHING;",
+            repo_id = self.repo_id,
+            actor_name = self.actor);
+
+        sql
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     #[serde(default = "id_not_specified")]
     pub id: i64,
     pub login: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Repo {
     #[serde(default = "id_not_specified")]
     pub id: i64,
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct PullRequest {
     pub merged: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Commit {
     pub sha: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Payload {
     pub action: Option<String>,
     #[serde(rename = "pull_request")]
@@ -35,13 +59,10 @@ pub struct Payload {
     pub commits: Option<Vec<Commit>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Event {
     #[serde(deserialize_with = "from_str")]
     pub id: i64,
-    // Actually a datetime, may need to adjust later
-    // EG: "created_at": "2013-01-01T12:00:17-08:00" for pre-2015 (rfc3339)
-    // "created_at": "2017-05-01T00:59:44Z" for post-2015 (UTC)
     pub created_at: String,
     #[serde(rename = "type")]
     pub event_type: String,
@@ -50,23 +71,120 @@ pub struct Event {
     pub payload: Option<Payload>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ActorAttributes {
     pub login: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct OldPullRequest {
+    pub merged: Option<bool>,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct OldPayload {
+    pub size: Option<i32>,
+    pub pull_request: Option<OldPullRequest>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Pre2015Actor {
+    actor: String,
+}
+
+impl<'de> Deserialize<'de> for Pre2015Actor
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: Deserializer<'de>
+    {
+        #[derive(Deserialize, Debug)]
+        struct ActorHelper {
+            login: String,
+        }
+
+        let v = Value::deserialize(deserializer)?;
+        if v.to_string().contains("{") {
+            // sometimes it's just missing, we'll deal with it by ignoring it.
+            let helper = ActorHelper::deserialize(&v).map_err(de::Error::custom)?;
+            // println!("all good, helper is {:?}", helper);
+            Ok(Pre2015Actor{
+                actor: helper.login,
+            })
+        } else {
+            Ok(Pre2015Actor{
+                actor: v.to_string().replace("\"", ""), // don't pass along the value of `"foo"`, make it `foo`
+            })
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct Pre2015Event {
-    // sometimes called repository because why not?
     pub repository: Option<Repo>,
     pub repo: Option<Repo>,
     #[serde(rename = "type")]
     pub event_type: String,
-    // sometimes this is a struct, sometimes it's a string
-    // pub actor: Actor,
-    // pub actor_attributes: ActorAttributes
-    // Actually a datetime, may need to adjust later
+    pub actor: Pre2015Actor,
     pub created_at: String,
+    pub payload: Option<OldPayload>,
+}
+
+impl Pre2015Event {
+    pub fn is_commit_event(&self) -> bool {
+        self.is_accepted_pr() || self.is_direct_push_event()
+    }
+
+    pub fn as_commit_event(&self) -> CommitEvent {
+        CommitEvent {
+            actor: self.actor_name().to_string(),
+            repo_id: self.repo_id(),
+        }
+    }
+
+    pub fn actor_name(&self) -> String {
+        self.actor.actor.to_string()
+    }
+
+    pub fn repo_id(&self) -> i64 {
+        let repo_id = match self.repo {
+            Some(ref repo) => repo.id,
+            None => match self.repository {
+                Some(ref repository) => repository.id,
+                None => -1, // TODO: somehow ignore this event, as we can't use it
+            }
+        };
+        repo_id
+    }
+
+    // TODO: if the event is old enough it just says "closed" for status, assume closed ones are accepted.
+    pub fn is_accepted_pr(&self) -> bool {
+        if self.event_type != "PullRequestEvent" {
+            return false;
+        }
+        match self.payload {
+            Some(ref payload) => match payload.pull_request {
+                Some(ref pr) => match pr.merged {
+                    Some(merged) => merged,
+                    None => false, // sometimes merged isn't there, instead of ignoring should we assume it was accepted?
+                },
+                None => false,
+            },
+            None => false,
+        }
+    }
+
+    pub fn is_direct_push_event(&self) -> bool {
+        if self.event_type != "PushEvent" {
+            return false;
+        }
+        match self.payload {
+            Some(ref payload) => match payload.size {
+                Some(x) => x > 0,
+                None => false,
+            },
+            None => false,
+        }
+    }
 }
 
 impl Event {
@@ -87,12 +205,26 @@ impl Event {
         }
     }
 
+    pub fn as_commit_event(&self) -> CommitEvent {
+        CommitEvent {
+            actor: match self.actor.login {
+                Some(ref actor_login) => actor_login.clone(),
+                None => "".to_string(),
+            },
+            repo_id: self.repo.id,
+        }
+    }
+
     // Also covers placeholder Events made in the constructor above
     pub fn is_missing_data(&self) -> bool{
         if self.id == -1 || self.repo.id == -1 || self.actor.id == -1 {
             return true;
         }
         false
+    }
+
+    pub fn is_commit_event(&self) -> bool {
+        self.is_accepted_pr() || self.is_direct_push_event()
     }
 
     pub fn is_accepted_pr(&self) -> bool {
