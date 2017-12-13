@@ -142,7 +142,7 @@ impl Pre2015Event {
     }
 
     pub fn actor_name(&self) -> String {
-        "TODO".to_string()
+        self.actor.actor.to_string()
     }
 
     pub fn repo_id(&self) -> i64 {
