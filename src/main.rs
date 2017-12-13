@@ -89,7 +89,6 @@ fn main() {
         if mode.committer_count {
             // TODO: extract to function
             if year_to_process < 2015 {
-                // change get_old_event_subset to only fetch x number of files?
                 let event_subset = get_old_event_subset_committers(chunk, &client);
                 let mut committer_events: Vec<CommitEvent> = event_subset
                     .par_iter()
@@ -111,32 +110,40 @@ fn main() {
                     no_more_work: false,
                 };
                 // try_send into first queue: if error, put into second queue
-                // ugh
+                // boo cloning:
                 let workitem_copy = workitem.clone();
                 match sender_a.try_send(workitem) {
                     Ok(_) => (),
                     Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
                 };
             } else {
-                // let event_subset = get_event_subset(chunk, &client);
-                // let sql = repo_id_to_name_mappings(&event_subset)
-                //     .par_iter()
-                //     .map(|item| format!("{}\n", item.as_sql()))
-                //     .collect::<Vec<String>>()
-                //     .join("");
+                let event_subset = get_event_subset_committers(chunk, &client);
+                let mut committer_events: Vec<CommitEvent> = event_subset
+                    .par_iter()
+                    .map(|item| item.as_commit_event())
+                    .collect();
+                committer_events.sort();
+                committer_events.dedup();
 
-                // let workitem = WorkItem {
-                //     sql: sql,
-                //     s3_bucket_name: dest_bucket.clone(),
-                //     s3_file_location: file_name,
-                //     no_more_work: false,
-                // };
-                // // try_send into first queue: if error, put into second queue
-                // let workitem_copy = workitem.clone();
-                // match sender_a.try_send(workitem) {
-                //     Ok(_) => (),
-                //     Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
-                // };
+                let sql = committer_events
+                    .par_iter()
+                    .map(|item| format!("{}\n", item.as_sql()))
+                    .collect::<Vec<String>>()
+                    .join("");
+
+                let workitem = WorkItem {
+                    sql: sql,
+                    s3_bucket_name: dest_bucket.clone(),
+                    s3_file_location: file_name,
+                    no_more_work: false,
+                };
+                // try_send into first queue: if error, put into second queue
+                // boo cloning:
+                let workitem_copy = workitem.clone();
+                match sender_a.try_send(workitem) {
+                    Ok(_) => (),
+                    Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
+                };
             }
         } else if mode.repo_mapping {
             // TODO: extract to function
@@ -156,7 +163,7 @@ fn main() {
                     no_more_work: false,
                 };
                 // try_send into first queue: if error, put into second queue
-                // ugh
+                // ugh, cloning
                 let workitem_copy = workitem.clone();
                 match sender_a.try_send(workitem) {
                     Ok(_) => (),
@@ -272,6 +279,18 @@ fn get_event_subset<P: ProvideAwsCredentials + Sync + Send,
         // todo: don't panic here
         .flat_map(|file_name| download_and_parse_file(file_name, &client).expect("Issue with file ingest"))
         .collect()
+}
+
+fn get_event_subset_committers<P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>(chunk: &[String], client: &S3Client<P, D>) -> Vec<Event> {
+    
+    let commit_events: Vec<Event> = chunk
+        .par_iter()
+        // todo: don't panic here
+        .flat_map(|file_name| download_and_parse_file(file_name, &client).expect("Issue with file ingest"))
+        .filter(|ref x| x.is_commit_event())
+        .collect();
+    commit_events
 }
 
 fn get_old_event_subset_committers<P: ProvideAwsCredentials + Sync + Send,

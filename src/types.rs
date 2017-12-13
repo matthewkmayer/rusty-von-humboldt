@@ -15,17 +15,13 @@ impl CommitEvent {
         if self.repo_id == -1 || self.actor == "" {
             return "".to_string();
         }
-        // TODO: implement:
-        // let sql = format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
-        //     VALUES ({repo_id}, '{repo_name}', '{event_timestamp}')
-        //     ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = ('{repo_name}', '{event_timestamp}')
-        //     WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;",
-        //     repo_id = self.repo_id,
-        //     repo_name = self.repo_name,
-        //     event_timestamp = self.event_timestamp).replace("\n", "");
+        let sql = format!("INSERT INTO committer_repo_id_names (repo_id, actor_name)
+            VALUES ({repo_id}, '{actor_name}')
+            ON CONFLICT DO NOTHING;",
+            repo_id = self.repo_id,
+            actor_name = self.actor);
 
-        // sql
-        "TODO".to_string()
+        sql
     }
 }
 
@@ -172,6 +168,16 @@ impl Event {
             },
             payload: None,
             created_at: "".to_string(),
+        }
+    }
+
+    pub fn as_commit_event(&self) -> CommitEvent {
+        CommitEvent {
+            actor: match self.actor.login {
+                Some(ref actor_login) => actor_login.clone(),
+                None => "".to_string(),
+            },
+            repo_id: self.repo.id,
         }
     }
 
