@@ -1,7 +1,10 @@
 use std::fmt::Display;
 use std::str::FromStr;
+use std::fmt;
+use serde::de::{self, Deserialize, Deserializer, Visitor, MapAccess};
+use serde_json::Value;
 
-use serde::de::{self, Deserialize, Deserializer};
+// TODO: sort file as source event types then mapped types.
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct CommitEvent {
@@ -61,9 +64,6 @@ pub struct Payload {
 pub struct Event {
     #[serde(deserialize_with = "from_str")]
     pub id: i64,
-    // Actually a datetime, may need to adjust later
-    // EG: "created_at": "2013-01-01T12:00:17-08:00" for pre-2015 (rfc3339)
-    // "created_at": "2017-05-01T00:59:44Z" for post-2015 (UTC)
     pub created_at: String,
     #[serde(rename = "type")]
     pub event_type: String,
@@ -79,25 +79,51 @@ pub struct ActorAttributes {
 
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct OldPullRequest {
-    pub merged: bool,
+    pub merged: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct OldPayload {
-    pub size: i32,
+    pub size: Option<i32>,
     pub pull_request: Option<OldPullRequest>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Pre2015Actor {
+    actor: String,
+}
+
+impl<'de> Deserialize<'de> for Pre2015Actor
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: Deserializer<'de>
+    {
+        #[derive(Deserialize)]
+        struct ActorHelper {
+            login: String,
+        }
+
+        // try from a string first
+
+
+        // if not a string, get into actor_helper?
+
+        let v = Value::deserialize(deserializer)?;
+        let helper = ActorHelper::deserialize(&v).map_err(de::Error::custom)?;
+        println!("v is {}", v);
+        Ok(Pre2015Actor{
+            actor: helper.login,
+        })
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Pre2015Event {
-    // sometimes called repository
     pub repository: Option<Repo>,
     pub repo: Option<Repo>,
     #[serde(rename = "type")]
     pub event_type: String,
-    // sometimes this is a struct, sometimes it's a string
-    // pub actor: Actor,
-    // pub actor_attributes: ActorAttributes
+    pub actor: Pre2015Actor,
     pub created_at: String,
     pub payload: Option<OldPayload>,
 }
@@ -109,7 +135,7 @@ impl Pre2015Event {
 
     pub fn as_commit_event(&self) -> CommitEvent {
         CommitEvent {
-            actor: "foo".to_string(),
+            actor: self.actor_name().to_string(),
             repo_id: self.repo_id(),
         }
     }
@@ -129,13 +155,17 @@ impl Pre2015Event {
         repo_id
     }
 
+    // TODO: if the event is old enough it just says "closed" for status, assume closed ones are accepted.
     pub fn is_accepted_pr(&self) -> bool {
         if self.event_type != "PullRequestEvent" {
             return false;
         }
         match self.payload {
             Some(ref payload) => match payload.pull_request {
-                Some(ref pr) => pr.merged, // TODO: 2011 or so events don't have this.
+                Some(ref pr) => match pr.merged {
+                    Some(merged) => merged,
+                    None => false, // sometimes merged isn't there, instead of ignoring should we assume it was accepted?
+                },
                 None => false,
             },
             None => false,
@@ -147,7 +177,10 @@ impl Pre2015Event {
             return false;
         }
         match self.payload {
-            Some(ref payload) => payload.size > 0,
+            Some(ref payload) => match payload.size {
+                Some(x) => x > 0,
+                None => false,
+            },
             None => false,
         }
     }
