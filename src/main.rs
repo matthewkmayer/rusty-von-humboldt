@@ -90,7 +90,7 @@ fn main() {
             // TODO: extract to function
             if year_to_process < 2015 {
                 let event_subset = get_old_event_subset_committers(chunk, &client);
-                println!("pre 2015 eventsubset is {:#?}", event_subset.first().unwrap());
+                // println!("pre 2015 eventsubset is {:#?}", event_subset.first().unwrap());
                 let mut committer_events: Vec<CommitEvent> = event_subset
                     .par_iter()
                     .map(|item| item.as_commit_event())
@@ -119,7 +119,7 @@ fn main() {
                 };
             } else {
                 let event_subset = get_event_subset_committers(chunk, &client);
-                println!("2015+ eventsubset is {:#?}", event_subset.first().unwrap());
+                // println!("2015+ eventsubset is {:#?}", event_subset.first().unwrap());
                 let mut committer_events: Vec<CommitEvent> = event_subset
                     .par_iter()
                     .map(|item| item.as_commit_event())
