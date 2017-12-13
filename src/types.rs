@@ -3,31 +3,31 @@ use std::str::FromStr;
 
 use serde::de::{self, Deserialize, Deserializer};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
     #[serde(default = "id_not_specified")]
     pub id: i64,
     pub login: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Repo {
     #[serde(default = "id_not_specified")]
     pub id: i64,
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct PullRequest {
     pub merged: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Commit {
     pub sha: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Payload {
     pub action: Option<String>,
     #[serde(rename = "pull_request")]
@@ -35,7 +35,7 @@ pub struct Payload {
     pub commits: Option<Vec<Commit>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Event {
     #[serde(deserialize_with = "from_str")]
     pub id: i64,
@@ -50,12 +50,23 @@ pub struct Event {
     pub payload: Option<Payload>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ActorAttributes {
     pub login: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct OldPullRequest {
+    pub merged: bool,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
+pub struct OldPayload {
+    pub size: i32,
+    pub pull_request: Option<OldPullRequest>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct Pre2015Event {
     // sometimes called repository because why not?
     pub repository: Option<Repo>,
@@ -67,6 +78,36 @@ pub struct Pre2015Event {
     // pub actor_attributes: ActorAttributes
     // Actually a datetime, may need to adjust later
     pub created_at: String,
+    pub payload: Option<OldPayload>,
+}
+
+impl Pre2015Event {
+    pub fn is_commit_event(&self) -> bool {
+        self.is_accepted_pr() || self.is_direct_push_event()
+    }
+
+    pub fn is_accepted_pr(&self) -> bool {
+        if self.event_type != "PullRequestEvent" {
+            return false;
+        }
+        match self.payload {
+            Some(ref payload) => match payload.pull_request {
+                Some(ref pr) => pr.merged,
+                None => false,
+            },
+            None => false,
+        }
+    }
+
+    pub fn is_direct_push_event(&self) -> bool {
+        if self.event_type != "PushEvent" {
+            return false;
+        }
+        match self.payload {
+            Some(ref payload) => payload.size > 0,
+            None => false,
+        }
+    }
 }
 
 impl Event {
@@ -93,6 +134,10 @@ impl Event {
             return true;
         }
         false
+    }
+
+    pub fn is_commit_event(&self) -> bool {
+        self.is_accepted_pr() || self.is_direct_push_event()
     }
 
     pub fn is_accepted_pr(&self) -> bool {
