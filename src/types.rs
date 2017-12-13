@@ -1,7 +1,6 @@
 use std::fmt::Display;
 use std::str::FromStr;
-use std::fmt;
-use serde::de::{self, Deserialize, Deserializer, Visitor, MapAccess};
+use serde::de::{self, Deserialize, Deserializer};
 use serde_json::Value;
 
 // TODO: sort file as source event types then mapped types.
@@ -98,22 +97,24 @@ impl<'de> Deserialize<'de> for Pre2015Actor
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: Deserializer<'de>
     {
-        #[derive(Deserialize)]
+        #[derive(Deserialize, Debug)]
         struct ActorHelper {
             login: String,
         }
 
-        // try from a string first
-
-
-        // if not a string, get into actor_helper?
-
         let v = Value::deserialize(deserializer)?;
-        let helper = ActorHelper::deserialize(&v).map_err(de::Error::custom)?;
-        println!("v is {}", v);
-        Ok(Pre2015Actor{
-            actor: helper.login,
-        })
+        // println!("v is {}", v);
+        if v.to_string().contains("{") {
+            let helper = ActorHelper::deserialize(&v).map_err(de::Error::custom)?;
+            // println!("all good, helper is {:?}", helper);
+            Ok(Pre2015Actor{
+                actor: helper.login,
+            })
+        } else {
+            Ok(Pre2015Actor{
+                actor: v.to_string().replace("\"", ""), // don't pass along the value of `"foo"`, make it `foo`
+            })
+        }
     }
 }
 
