@@ -7,7 +7,8 @@ extern crate flate2;
 
 use std::io::{BufReader, BufRead};
 use std::env;
-use rusoto_core::{DefaultCredentialsProvider, Region, default_tls_client};
+use std::{thread, time};
+use rusoto_core::{DefaultCredentialsProviderSync, Region, default_tls_client, ProvideAwsCredentials, DispatchSignedRequest};
 use rusoto_s3::{S3, S3Client, ListObjectsV2Request, GetObjectRequest};
 use self::flate2::read::GzDecoder;
 use types::*;
@@ -22,7 +23,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         .expect("Need GHAHOURS set to number of hours (files) to process")
         .parse::<i64>().expect("Please set GHAHOURS to an integer value");
     let client = S3Client::new(default_tls_client().unwrap(),
-                               DefaultCredentialsProvider::new().unwrap(),
+                               DefaultCredentialsProviderSync::new().unwrap(),
                                Region::UsEast1);
 
     let mut key_count_to_request = 10;
@@ -88,11 +89,10 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
     files
 }
 
-pub fn download_and_parse_old_file(file_on_s3: &str) -> Result<Vec<Pre2015Event>, String> {
+pub fn download_and_parse_old_file
+    <P: ProvideAwsCredentials,
+    D: DispatchSignedRequest>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Pre2015Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
-    let client = S3Client::new(default_tls_client().unwrap(),
-                               DefaultCredentialsProvider::new().unwrap(),
-                               Region::UsEast1);
 
     let get_req = GetObjectRequest {
         bucket: bucket.to_owned(),
@@ -104,6 +104,7 @@ pub fn download_and_parse_old_file(file_on_s3: &str) -> Result<Vec<Pre2015Event>
         Ok(s3_result) => s3_result,
         Err(err) => {
             println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            thread::sleep(time::Duration::from_millis(8000));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
                 Err(err) => {
@@ -117,11 +118,9 @@ pub fn download_and_parse_old_file(file_on_s3: &str) -> Result<Vec<Pre2015Event>
     parse_ze_file_2014_older(BufReader::new(decoder))
 }
 
-pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
+pub fn download_and_parse_file<P: ProvideAwsCredentials,
+    D: DispatchSignedRequest>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
-    let client = S3Client::new(default_tls_client().unwrap(),
-                               DefaultCredentialsProvider::new().unwrap(),
-                               Region::UsEast1);
 
     let get_req = GetObjectRequest {
         bucket: bucket.to_owned(),
@@ -133,6 +132,8 @@ pub fn download_and_parse_file(file_on_s3: &str) -> Result<Vec<Event>, String> {
         Ok(s3_result) => s3_result,
         Err(err) => {
             println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            let three_seconds = time::Duration::from_millis(8000);
+            thread::sleep(three_seconds);
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
                 Err(err) => {
