@@ -117,8 +117,9 @@ fn make_channels_and_threads() -> Vec<PipelineTracker> {
                 break;
             }
 
-            // Do real work here:
-            single_function_of_doom(&client);
+            // file name should come from a centrally controlled source.
+            // A mutex'd vector of some kind that we can drain?
+            single_function_of_doom(&client, &vec![item.file]);
         }
     });
     let pipe = PipelineTracker {
@@ -132,7 +133,7 @@ fn make_channels_and_threads() -> Vec<PipelineTracker> {
 fn single_function_of_doom 
     <P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>
-    (client: &S3Client<P, D>) {
+    (client: &S3Client<P, D>, chunk: &[String]) {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     if MODE.committer_count {
         // TODO: extract to function
