@@ -60,25 +60,29 @@ fn wait_for_threads(pipes: Vec<PipelineTracker>) {
 fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
     for file in file_list {
         let mut file_sent = false;
+        let item_to_send = FileWorkItem {
+            file: file.clone(),
+            no_more_work: false,
+        };
         for pipe in pipes {
             if file_sent {
                 break;
-            }
-            let item_to_send = FileWorkItem {
-                file: file.clone(),
-                no_more_work: false,
-            };
+            }  
             match pipe.transmit_channel.try_send(item_to_send.clone()) {
                 Ok(_) => file_sent = true,
                 Err(_) => (),
             }
+        }
+        // it's possible we got here and haven't sent the file.
+        // Stuff it into the first item and wait for things to finish up.
+        if !file_sent {
+            pipes.first().unwrap().transmit_channel.send(item_to_send).unwrap();
         }
     }
 }
 
 // TODO: create more than one
 fn make_channels_and_threads() -> Vec<PipelineTracker> {
-    // assign a subset to each thread
     let (send, recv) = sync_channel(2);
     let thread = thread::spawn(move|| {
         let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
