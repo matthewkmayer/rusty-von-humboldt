@@ -51,7 +51,9 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref YEAR: String = env::var("GHAYEAR").unwrap();
+    static ref YEAR: i32 = {
+        env::var("GHAYEAR").unwrap().parse::<i32>().unwrap()
+    };
 }
 
 fn pipeline_main() {
@@ -127,12 +129,14 @@ fn make_channels_and_threads() -> Vec<PipelineTracker> {
     vec![pipe]
 }
 
-fn single_function_of_doom(client: &S3Client) {
+fn single_function_of_doom 
+    <P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>
+    (client: &S3Client<P, D>) {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
-
     if MODE.committer_count {
         // TODO: extract to function
-        if YEAR < 2015 {
+        if *YEAR < 2015 {
             let event_subset = get_old_event_subset_committers(chunk, &client);
             // println!("pre 2015 eventsubset is {:#?}", event_subset.first().unwrap());
             let mut committer_events: Vec<CommitEvent> = event_subset
@@ -193,7 +197,7 @@ fn single_function_of_doom(client: &S3Client) {
         }
     } else if MODE.repo_mapping {
         // TODO: extract to function
-        if YEAR < 2015 {
+        if *YEAR < 2015 {
             // change get_old_event_subset to only fetch x number of files?
             let event_subset = get_old_event_subset(chunk, &client);
             let sql = repo_id_to_name_mappings_old(&event_subset)
@@ -289,7 +293,7 @@ fn main() {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
         let file_name = format!("rvh/committer/{}/commiter_count_{:07}.txt.gz", year_to_process, i);
 
-        single_function_of_doom();
+        // single_function_of_doom(&client);
 
         approx_files_seen += CHUNK_SIZE;
     }
