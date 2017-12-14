@@ -90,8 +90,8 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 }
 
 pub fn download_and_parse_old_file
-    <P: ProvideAwsCredentials,
-    D: DispatchSignedRequest>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Pre2015Event>, String> {
+    <P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Pre2015Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
 
     let get_req = GetObjectRequest {
@@ -114,12 +114,14 @@ pub fn download_and_parse_old_file
             }
         }
     };
-    let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
+
+    let decoder = GzDecoder::new(result.body.expect("body should be preset")).expect("Couldn't make a decoder");
     parse_ze_file_2014_older(BufReader::new(decoder))
 }
 
-pub fn download_and_parse_file<P: ProvideAwsCredentials,
-    D: DispatchSignedRequest>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Event>, String> {
+pub fn download_and_parse_file
+    <P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
 
     let get_req = GetObjectRequest {
