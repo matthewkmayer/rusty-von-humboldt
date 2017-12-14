@@ -58,7 +58,7 @@ fn wait_for_threads(pipes: Vec<PipelineTracker>) {
 }
 
 fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
-    for file in file_list {
+    for (i, file) in file_list.iter().enumerate() {
         let mut file_sent = false;
         let item_to_send = FileWorkItem {
             file: file.clone(),
@@ -77,6 +77,10 @@ fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
         // Stuff it into the first item and wait for things to finish up.
         if !file_sent {
             pipes.first().unwrap().transmit_channel.send(item_to_send).unwrap();
+        }
+        // print how many ingest files we've sent off so far
+        if i % 20 == 0 {
+            println!("Processed {} files.", i);
         }
     }
 }
@@ -154,6 +158,7 @@ fn generate_mode_string() -> String {
     "repomapping".to_string()
 }
 
+// should be on the receiving end of a channel instead of being a function call, I think.
 fn single_function_of_doom 
     <P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>
