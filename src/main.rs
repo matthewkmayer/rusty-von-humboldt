@@ -8,6 +8,8 @@ extern crate rusoto_core;
 extern crate rusoto_s3;
 extern crate flate2;
 extern crate rand;
+#[macro_use]
+extern crate lazy_static;
 
 use std::io::prelude::*;
 use std::env;
@@ -41,6 +43,17 @@ struct FileWorkItem {
     no_more_work: bool,
 }
 
+lazy_static! {
+    static ref MODE: Mode = Mode { 
+        committer_count: true,
+        repo_mapping: false
+    };
+}
+
+lazy_static! {
+    static ref YEAR: String = env::var("GHAYEAR").unwrap();
+}
+
 fn pipeline_main() {
     environment_check();
 
@@ -50,7 +63,6 @@ fn pipeline_main() {
     // distribute file list equally into the pipeline channels
     send_ze_files(&pipes, &file_list);
 
-    // wait for everything to wrap up and off we go
     wait_for_threads(pipes);
 }
 
@@ -87,25 +99,155 @@ fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
     }
 }
 
-// TODO: do more than one
+// TODO: create more than one
 fn make_channels_and_threads() -> Vec<PipelineTracker> {
     let (send, recv) = sync_channel(2);
     let thread = thread::spawn(move|| {
-        // this should loop until it gets a "done" signal
-        // work done here
-        recv.recv();
+        let client = S3Client::new(default_tls_client().unwrap(),
+            DefaultCredentialsProviderSync::new().unwrap(),
+            Region::UsEast1);
+        loop {
+            let item: FileWorkItem = match recv.recv() {
+                Ok(i) => i,
+                Err(_) => continue,
+            };
+            if item.no_more_work {
+                break;
+            }
+
+            // Do real work here:
+            single_function_of_doom(&client);
+        }
     });
-    let foo = PipelineTracker {
+    let pipe = PipelineTracker {
         thread: thread,
         transmit_channel: send,
     };
 
-    vec![foo]
+    vec![pipe]
+}
+
+fn single_function_of_doom(client: &S3Client) {
+    let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
+
+    if MODE.committer_count {
+        // TODO: extract to function
+        if YEAR < 2015 {
+            let event_subset = get_old_event_subset_committers(chunk, &client);
+            // println!("pre 2015 eventsubset is {:#?}", event_subset.first().unwrap());
+            let mut committer_events: Vec<CommitEvent> = event_subset
+                .par_iter()
+                .map(|item| item.as_commit_event())
+                .collect();
+            committer_events.sort();
+            committer_events.dedup();
+
+            let sql = committer_events
+                .par_iter()
+                .map(|item| format!("{}\n", item.as_sql()))
+                .collect::<Vec<String>>()
+                .join("");
+
+            let workitem = WorkItem {
+                sql: sql,
+                s3_bucket_name: dest_bucket.clone(),
+                s3_file_location: file_name,
+                no_more_work: false,
+            };
+            // try_send into first queue: if error, put into second queue
+            // boo cloning:
+            let workitem_copy = workitem.clone();
+            match sender_a.try_send(workitem) {
+                Ok(_) => (),
+                Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
+            };
+        } else {
+            let event_subset = get_event_subset_committers(chunk, &client);
+            // println!("2015+ eventsubset is {:#?}", event_subset.first().unwrap());
+            let mut committer_events: Vec<CommitEvent> = event_subset
+                .par_iter()
+                .map(|item| item.as_commit_event())
+                .collect();
+            committer_events.sort();
+            committer_events.dedup();
+
+            let sql = committer_events
+                .par_iter()
+                .map(|item| format!("{}\n", item.as_sql()))
+                .collect::<Vec<String>>()
+                .join("");
+
+            let workitem = WorkItem {
+                sql: sql,
+                s3_bucket_name: dest_bucket.clone(),
+                s3_file_location: file_name,
+                no_more_work: false,
+            };
+            // try_send into first queue: if error, put into second queue
+            // boo cloning:
+            let workitem_copy = workitem.clone();
+            match sender_a.try_send(workitem) {
+                Ok(_) => (),
+                Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
+            };
+        }
+    } else if MODE.repo_mapping {
+        // TODO: extract to function
+        if YEAR < 2015 {
+            // change get_old_event_subset to only fetch x number of files?
+            let event_subset = get_old_event_subset(chunk, &client);
+            let sql = repo_id_to_name_mappings_old(&event_subset)
+                .par_iter()
+                .map(|item| format!("{}\n", item.as_sql()))
+                .collect::<Vec<String>>()
+                .join("");
+
+            let workitem = WorkItem {
+                sql: sql,
+                s3_bucket_name: dest_bucket.clone(),
+                s3_file_location: file_name,
+                no_more_work: false,
+            };
+            // try_send into first queue: if error, put into second queue
+            // ugh, cloning
+            let workitem_copy = workitem.clone();
+            match sender_a.try_send(workitem) {
+                Ok(_) => (),
+                Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
+            };
+        } else {
+            let event_subset = get_event_subset(chunk, &client);
+            let sql = repo_id_to_name_mappings(&event_subset)
+                .par_iter()
+                .map(|item| format!("{}\n", item.as_sql()))
+                .collect::<Vec<String>>()
+                .join("");
+
+            let workitem = WorkItem {
+                sql: sql,
+                s3_bucket_name: dest_bucket.clone(),
+                s3_file_location: file_name,
+                no_more_work: false,
+            };
+            // try_send into first queue: if error, put into second queue
+            let workitem_copy = workitem.clone();
+            match sender_a.try_send(workitem) {
+                Ok(_) => (),
+                Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
+            };
+        }
+    }
 }
 
 // check things like dryrun etc
 fn environment_check() {
     // if bad, just panic
+    let _ = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
+    let _ = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
+    let _ = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process");
+    let _ = env::var("GHAHOURS")
+        .expect("Need GHAHOURS set to number of hours (files) to process")
+        .parse::<i64>().expect("Please set GHAHOURS to an integer value");
 }
 
 fn main() {
@@ -123,7 +265,6 @@ fn main() {
         false => println!("Doing things for real!"),
     }
     
-
     let mode = Mode {committer_count: true, repo_mapping: false};
 
     // We'll need more than two threads for this!
@@ -143,123 +284,12 @@ fn main() {
 
     let mut approx_files_seen: i64 = 0;
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
-    // split processing of file list here
-    let client = S3Client::new(default_tls_client().unwrap(),
-        DefaultCredentialsProviderSync::new().unwrap(),
-        Region::UsEast1);
     
     for (i, chunk) in file_list.chunks(CHUNK_SIZE as usize).enumerate() {
         println!("My chunk is {:#?} and approx_files_seen is {:?}", chunk, approx_files_seen);
         let file_name = format!("rvh/committer/{}/commiter_count_{:07}.txt.gz", year_to_process, i);
 
-        // break it up by what we do:
-        if mode.committer_count {
-            // TODO: extract to function
-            if year_to_process < 2015 {
-                let event_subset = get_old_event_subset_committers(chunk, &client);
-                // println!("pre 2015 eventsubset is {:#?}", event_subset.first().unwrap());
-                let mut committer_events: Vec<CommitEvent> = event_subset
-                    .par_iter()
-                    .map(|item| item.as_commit_event())
-                    .collect();
-                committer_events.sort();
-                committer_events.dedup();
-
-                let sql = committer_events
-                    .par_iter()
-                    .map(|item| format!("{}\n", item.as_sql()))
-                    .collect::<Vec<String>>()
-                    .join("");
-
-                let workitem = WorkItem {
-                    sql: sql,
-                    s3_bucket_name: dest_bucket.clone(),
-                    s3_file_location: file_name,
-                    no_more_work: false,
-                };
-                // try_send into first queue: if error, put into second queue
-                // boo cloning:
-                let workitem_copy = workitem.clone();
-                match sender_a.try_send(workitem) {
-                    Ok(_) => (),
-                    Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
-                };
-            } else {
-                let event_subset = get_event_subset_committers(chunk, &client);
-                // println!("2015+ eventsubset is {:#?}", event_subset.first().unwrap());
-                let mut committer_events: Vec<CommitEvent> = event_subset
-                    .par_iter()
-                    .map(|item| item.as_commit_event())
-                    .collect();
-                committer_events.sort();
-                committer_events.dedup();
-
-                let sql = committer_events
-                    .par_iter()
-                    .map(|item| format!("{}\n", item.as_sql()))
-                    .collect::<Vec<String>>()
-                    .join("");
-
-                let workitem = WorkItem {
-                    sql: sql,
-                    s3_bucket_name: dest_bucket.clone(),
-                    s3_file_location: file_name,
-                    no_more_work: false,
-                };
-                // try_send into first queue: if error, put into second queue
-                // boo cloning:
-                let workitem_copy = workitem.clone();
-                match sender_a.try_send(workitem) {
-                    Ok(_) => (),
-                    Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
-                };
-            }
-        } else if mode.repo_mapping {
-            // TODO: extract to function
-            if year_to_process < 2015 {
-                // change get_old_event_subset to only fetch x number of files?
-                let event_subset = get_old_event_subset(chunk, &client);
-                let sql = repo_id_to_name_mappings_old(&event_subset)
-                    .par_iter()
-                    .map(|item| format!("{}\n", item.as_sql()))
-                    .collect::<Vec<String>>()
-                    .join("");
-
-                let workitem = WorkItem {
-                    sql: sql,
-                    s3_bucket_name: dest_bucket.clone(),
-                    s3_file_location: file_name,
-                    no_more_work: false,
-                };
-                // try_send into first queue: if error, put into second queue
-                // ugh, cloning
-                let workitem_copy = workitem.clone();
-                match sender_a.try_send(workitem) {
-                    Ok(_) => (),
-                    Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
-                };
-            } else {
-                let event_subset = get_event_subset(chunk, &client);
-                let sql = repo_id_to_name_mappings(&event_subset)
-                    .par_iter()
-                    .map(|item| format!("{}\n", item.as_sql()))
-                    .collect::<Vec<String>>()
-                    .join("");
-
-                let workitem = WorkItem {
-                    sql: sql,
-                    s3_bucket_name: dest_bucket.clone(),
-                    s3_file_location: file_name,
-                    no_more_work: false,
-                };
-                // try_send into first queue: if error, put into second queue
-                let workitem_copy = workitem.clone();
-                match sender_a.try_send(workitem) {
-                    Ok(_) => (),
-                    Err(_) => sender_b.send(workitem_copy).expect("Couldn't put item into second work queue."),
-                };
-            }
-        }
+        single_function_of_doom();
 
         approx_files_seen += CHUNK_SIZE;
     }
