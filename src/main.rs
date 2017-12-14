@@ -46,7 +46,16 @@ struct FileWorkItem {
 lazy_static! {
     static ref MODE: Mode = Mode { 
         committer_count: true,
-        repo_mapping: false
+        repo_mapping: false,
+        dry_run: {
+            match env::var("DRYRUN"){
+                Ok(dryrun) => match bool::from_str(&dryrun) {
+                    Ok(should_dryrun) => should_dryrun,
+                    Err(_) => false,
+                },
+                Err(_) => false,  
+            }
+        },
     };
 }
 
@@ -130,6 +139,42 @@ fn make_channels_and_threads() -> Vec<PipelineTracker> {
     vec![pipe]
 }
 
+fn compress_and_send
+    <P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>
+    (work_item: WorkItem, client: &S3Client<P, D>) {
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(work_item.sql.as_bytes()).expect("encoding failed");
+    let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
+
+    let upload_request = PutObjectRequest {
+        bucket: work_item.s3_bucket_name.to_owned(),
+        key: work_item.s3_file_location.to_owned(),
+        body: Some(compressed_results.clone()),
+        ..Default::default()
+    };
+
+    if MODE.dry_run {
+        println!("Not uploading to S3, it's a dry run.");
+        return
+    }
+
+    match client.put_object(&upload_request) {
+        Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
+        Err(e) => {
+            println!("Failed to upload {} to {}: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
+            thread::sleep(time::Duration::from_millis(8000));
+            match client.put_object(&upload_request) {
+                Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
+                Err(e) => {
+                    println!("Failed to upload {} to {}, second attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
+                },
+            };
+        }
+    }
+}
+
 fn single_function_of_doom 
     <P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>
@@ -138,9 +183,7 @@ fn single_function_of_doom
     if MODE.committer_count {
         // TODO: extract to function
         if *YEAR < 2015 {
-            let event_subset = get_old_event_subset_committers(chunk, &client);
-            // println!("pre 2015 eventsubset is {:#?}", event_subset.first().unwrap());
-            let mut committer_events: Vec<CommitEvent> = event_subset
+            let mut committer_events: Vec<CommitEvent> = get_old_event_subset_committers(chunk, &client)
                 .par_iter()
                 .map(|item| item.as_commit_event())
                 .collect();
@@ -270,7 +313,7 @@ fn main() {
         false => println!("Doing things for real!"),
     }
     
-    let mode = Mode {committer_count: true, repo_mapping: false};
+    let mode = Mode {committer_count: true, repo_mapping: false, dry_run: true};
 
     // We'll need more than two threads for this!
     let (sender_a, receiver_a) = sync_channel(2);
@@ -472,4 +515,5 @@ struct WorkItem {
 struct Mode {
     committer_count: bool,
     repo_mapping: bool,
+    dry_run: bool,
 }
