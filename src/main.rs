@@ -13,6 +13,7 @@ use std::io::prelude::*;
 use std::env;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::{thread, time};
+use std::thread::JoinHandle;
 use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
@@ -27,18 +28,84 @@ use rusoto_s3::{S3, S3Client, PutObjectRequest};
 // when downloading and deserializing files.
 const CHUNK_SIZE: i64 = 120;
 
-#[derive(Debug, Clone)]
-struct WorkItem {
-    sql: String,
-    s3_bucket_name: String,
-    s3_file_location: String,
-    no_more_work: bool,
+// TODO: don't use a String as we need to send a "done" marker
+#[derive(Debug)]
+struct PipelineTracker {
+    thread: JoinHandle<()>,
+    transmit_channel: std::sync::mpsc::SyncSender<FileWorkItem>,
 }
 
 #[derive(Debug, Clone)]
-struct Mode {
-    committer_count: bool,
-    repo_mapping: bool,
+struct FileWorkItem {
+    file: String,
+    no_more_work: bool,
+}
+
+fn pipeline_main() {
+    environment_check();
+
+    let pipes = make_channels_and_threads();
+    let file_list = make_list();
+
+    // distribute file list equally into the pipeline channels
+    send_ze_files(&pipes, &file_list);
+
+    // wait for everything to wrap up and off we go
+    wait_for_threads(pipes);
+}
+
+fn wait_for_threads(pipes: Vec<PipelineTracker>) {
+    for pipe in pipes {
+        let done_signal = FileWorkItem {
+            file: String::new(),
+            no_more_work: false,
+        };
+        pipe.transmit_channel.send(done_signal);
+        match pipe.thread.join() {
+            Ok(_) => println!("Pipe thread all wrapped up."),
+            Err(e) => println!("Pipe thread didn't want to quit: {:?}", e),
+        }
+    }
+}
+
+fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
+    for file in file_list {
+        let mut file_sent = false;
+        for pipe in pipes {
+            if file_sent {
+                break;
+            }
+            let item_to_send = FileWorkItem {
+                file: file.clone(),
+                no_more_work: false,
+            };
+            match pipe.transmit_channel.try_send(item_to_send.clone()) {
+                Ok(_) => file_sent = true,
+                Err(_) => (),
+            }
+        }
+    }
+}
+
+// TODO: do more than one
+fn make_channels_and_threads() -> Vec<PipelineTracker> {
+    let (send, recv) = sync_channel(2);
+    let thread = thread::spawn(move|| {
+        // this should loop until it gets a "done" signal
+        // work done here
+        recv.recv();
+    });
+    let foo = PipelineTracker {
+        thread: thread,
+        transmit_channel: send,
+    };
+
+    vec![foo]
+}
+
+// check things like dryrun etc
+fn environment_check() {
+    // if bad, just panic
 }
 
 fn main() {
@@ -347,7 +414,6 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
         
 }
 
-
 fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
     events
         .par_iter()
@@ -357,4 +423,18 @@ fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
                 event_timestamp: r.created_at.clone(),
             })
         .collect()
+}
+
+#[derive(Debug, Clone)]
+struct WorkItem {
+    sql: String,
+    s3_bucket_name: String,
+    s3_file_location: String,
+    no_more_work: bool,
+}
+
+#[derive(Debug, Clone)]
+struct Mode {
+    committer_count: bool,
+    repo_mapping: bool,
 }
