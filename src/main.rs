@@ -81,31 +81,34 @@ fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
     }
 }
 
-// TODO: create more than one
 fn make_channels_and_threads() -> Vec<PipelineTracker> {
-    let (send, recv) = sync_channel(2);
-    let thread = thread::spawn(move|| {
-        let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
-            DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-            Region::UsEast1);
-        loop {
-            let item: FileWorkItem = match recv.recv() {
-                Ok(i) => i,
-                Err(_) => continue,
-            };
-            if item.no_more_work {
-                println!("No more work, hooray!");
-                return;
+    let mut pipes: Vec<PipelineTracker> = Vec::new();
+    let num_threads = 4; // use num_cpus here?
+    for _x in 0..num_threads {
+        let (send, recv) = sync_channel(2);
+        let thread = thread::spawn(move|| {
+            let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                Region::UsEast1);
+            loop {
+                let item: FileWorkItem = match recv.recv() {
+                    Ok(i) => i,
+                    Err(_) => continue,
+                };
+                if item.no_more_work {
+                    println!("No more work, hooray!");
+                    return;
+                }
+                single_function_of_doom(&client, &vec![item.file]);
             }
-            single_function_of_doom(&client, &vec![item.file]);
-        }
-    });
-    let pipe = PipelineTracker {
-        thread: thread,
-        transmit_channel: send,
-    };
-
-    vec![pipe]
+        });
+        let pipe = PipelineTracker {
+            thread: thread,
+            transmit_channel: send,
+        };
+        pipes.push(pipe);
+    }
+    pipes
 }
 
 fn compress_and_send
