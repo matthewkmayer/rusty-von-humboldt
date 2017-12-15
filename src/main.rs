@@ -500,3 +500,42 @@ lazy_static! {
         env::var("GHAYEAR").expect("Please set GHAYEAR env var").parse::<i32>().expect("Please set GHAYEAR env var to an integer value.")
     };
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn reduce_works() {
+        use repo_id_to_name_mappings;
+        use rusty_von_humboldt::RepoIdToName;
+        use rusty_von_humboldt::types::Event;
+        use chrono::{DateTime, TimeZone, Utc};
+        use std::ops::Add;
+
+        let most_newest_timestamp = Utc.ymd(2014, 7, 8).and_hms(9, 10, 11);
+        let an_older_timestamp = Utc.ymd(2014, 7, 8).and_hms(0, 10, 11);
+
+        let mut expected: Vec<RepoIdToName> = Vec::new();
+        expected.push(RepoIdToName {
+            repo_id: 5,
+            repo_name: "new".to_string(),
+            event_timestamp: most_newest_timestamp,
+        });
+
+        let mut input = Vec::new();
+        
+        let mut foo = Event::new();
+        foo.repo.id = 5;
+        foo.repo.name = "old".to_string();
+        foo.created_at = an_older_timestamp;
+        input.push(foo);
+
+        foo = Event::new();
+        foo.repo.id = 5;
+        foo.repo.name = "new".to_string();
+        foo.created_at = most_newest_timestamp;
+        input.push(foo);
+
+        assert_eq!(expected, repo_id_to_name_mappings(&input));
+    }
+}
