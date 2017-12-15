@@ -22,7 +22,7 @@ use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
@@ -377,33 +377,20 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 }
             };
 
-            // // convert created_at to chrono something.
-            // let timestamp = match DateTime::parse_from_rfc2822(&r.created_at) {
-            //     Ok(time) => time,
-            //     Err(_) => {
-            //         match DateTime::parse_from_rfc3339(&r.created_at) {
-            //             Ok(time) => time,
-            //             Err(_) => {
-            //                 println!("\nCouldn't get {:?} converted to either rfc 2822 or 3339.\n", r.created_at);
-            //                 panic!(format!("Couldn't convert {:?} to either rfc 2822 or 3339", r.created_at));
-            //             },
-            //         }
-            //     },
-            // };
+            // convert created_at to chrono something.
+            let timestamp = match DateTime::parse_from_rfc3339(&r.created_at) {
+                Ok(time) => time,
+                Err(_) => DateTime::parse_from_rfc3339("2011-01-01T21:00:09+09:00").unwrap(), // Make ourselves low priority
+            };
 
-            // let utc_timestamp = match timestamp.to_string().parse::<DateTime<Utc>>() {
-            //     Ok(time) => time,
-            //     Err(e) => panic!("couldn't make utc timestampe from {:?}: {:?}", timestamp, e),
-            // };
+            let utc_timestamp = DateTime::<Utc>::from_utc(timestamp.naive_utc(), Utc);
 
-            // println!("Converted {:?} to {:?}", r.created_at, utc_timestamp);
-
-            panic!("Faking utc timestamp, fix this before running");
+            println!("Converted {:?} to {:?}", r.created_at, utc_timestamp);
 
             RepoIdToName {
                     repo_id: repo_id,
                     repo_name: repo_name,
-                    event_timestamp: Utc::now(),
+                    event_timestamp: utc_timestamp,
                 }
             }
         )
@@ -509,8 +496,7 @@ mod tests {
         use repo_id_to_name_mappings;
         use rusty_von_humboldt::RepoIdToName;
         use rusty_von_humboldt::types::Event;
-        use chrono::{DateTime, TimeZone, Utc};
-        use std::ops::Add;
+        use chrono::{TimeZone, Utc};
 
         let most_newest_timestamp = Utc.ymd(2014, 7, 8).and_hms(9, 10, 11);
         let an_older_timestamp = Utc.ymd(2014, 7, 8).and_hms(0, 10, 11);
@@ -537,5 +523,26 @@ mod tests {
         input.push(foo);
 
         assert_eq!(expected, repo_id_to_name_mappings(&input));
+    }
+
+    // mostly a test for playing with the different timestamps in pre-2015 events
+    #[test]
+    fn timestamp_parsing() {
+        use chrono::{DateTime, Utc};
+        let style_one = "2013-01-01T12:00:24-08:00";
+        let style_two = "2011-05-01T15:59:59Z";
+
+        match DateTime::parse_from_rfc3339(style_one) {
+            Ok(time) => println!("got {:?} from {:?}", time, style_one),
+            Err(e) => println!("Failed to get anything from {:?}. Error: {:?}", style_one, e),
+        }
+
+        match DateTime::parse_from_rfc3339(style_two) {
+            Ok(time) => println!("got {:?} from {:?}", time, style_two),
+            Err(e) => println!("Failed to get anything from {:?}. Error: {:?}", style_two, e),
+        }
+
+        let localtime = DateTime::parse_from_rfc3339(style_two).unwrap();
+        let _utc: DateTime<Utc> = DateTime::<Utc>::from_utc(localtime.naive_utc(), Utc);
     }
 }
