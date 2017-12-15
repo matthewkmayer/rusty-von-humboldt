@@ -261,6 +261,7 @@ fn single_function_of_doom
             };
             compress_and_send(workitem, client);
         } else {
+            // deduping this would be ~~~~amazing
             let event_subset = get_event_subset(chunk, &client);
             let sql = repo_id_to_name_mappings(&event_subset)
                 .par_iter()
