@@ -11,6 +11,7 @@ extern crate rand;
 extern crate md5;
 #[macro_use]
 extern crate lazy_static;
+extern crate chrono;
 
 use std::io::prelude::*;
 use std::env;
@@ -21,6 +22,7 @@ use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use chrono::{DateTime, Utc};
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
@@ -41,15 +43,25 @@ fn pipeline_main() {
 }
 
 fn wait_for_threads(pipes: Vec<PipelineTracker>) {
-    for pipe in pipes {
+    println!("Waiting for threads to finish by sending end of work signal.");
+    for pipe in &pipes {
         let done_signal = FileWorkItem {
             file: String::new(),
             no_more_work: true,
         };
-        match pipe.transmit_channel.send(done_signal) {
-            Ok(_) => (),
-            Err(e) => println!("Couldn't send to channel: {}", e),
+        let mut done = false;
+        while !done {
+            match pipe.transmit_channel.try_send(done_signal.clone()) {
+                Ok(_) => done = true,
+                Err(e) => {
+                    println!("Couldn't send to channel: {}", e);
+                    thread::sleep(time::Duration::from_millis(5000));
+                },
+            }
         }
+    }
+    println!("\nSent end of work signal to all threads, waiting.\n");
+    for pipe in pipes {
         match pipe.thread.join() {
             Ok(_) => println!("Pipe thread all wrapped up."),
             Err(e) => println!("Pipe thread didn't want to quit: {:?}", e),
@@ -64,30 +76,31 @@ fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
             file: file.clone(),
             no_more_work: false,
         };
-        for pipe in pipes {
-            if file_sent {
-                break;
-            }  
-            match pipe.transmit_channel.try_send(item_to_send.clone()) {
-                Ok(_) => file_sent = true,
-                Err(_) => (),
+        // Keep trying to find the first open slot
+        while !file_sent {
+            for pipe in pipes {
+                if file_sent {
+                    break;
+                }  
+                match pipe.transmit_channel.try_send(item_to_send.clone()) {
+                    Ok(_) => file_sent = true,
+                    Err(_) => (),
+                }
             }
-        }
-        // it's possible we got here and haven't sent the file.
-        // Stuff it into the first item and wait for things to finish up.
-        if !file_sent {
-            pipes.first().unwrap().transmit_channel.send(item_to_send).unwrap();
+            // Is this needed?
+            thread::sleep(time::Duration::from_millis(2));
         }
         // print how many ingest files we've sent off so far
-        if i % 20 == 0 {
-            println!("Processed {} files.", i);
+        if i % 100 == 0 {
+            println!("Distributed {} files to process.", i);
         }
     }
+    println!("Files all sent.");
 }
 
 fn make_channels_and_threads() -> Vec<PipelineTracker> {
     let mut pipes: Vec<PipelineTracker> = Vec::new();
-    let num_threads = 4;
+    let num_threads = 3;
     for _x in 0..num_threads {
         let (send, recv) = sync_channel(2);
         let thread = thread::spawn(move|| {
@@ -95,19 +108,22 @@ fn make_channels_and_threads() -> Vec<PipelineTracker> {
                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
                 Region::UsEast1);
             let mut wrap_things_up = false;
+            let mut work_items: Vec<String> = Vec::new();
+            println!("Thread {:?}, starting.", thread::current().id());
             loop {
                 if wrap_things_up {
+                    println!("wrapping thread up.");
                     break;
                 }
-                let mut work_items: Vec<String> = Vec::new();
+                work_items.clear();
                 // this loop does the accumulation of items to download, parse, convert, compress, upload:
                 loop {
-                    if work_items.len() >= 50 {
-                        break;
-                    }
                     let item: FileWorkItem = match recv.recv() {
                         Ok(i) => i,
-                        Err(_) => panic!("receiving error"), // was continue
+                        Err(e) => {
+                            println!("Oh noe receiving error: {:?}", e);
+                            panic!("receiving error");
+                        },
                     };
                     if item.no_more_work {
                         println!("No more work, hooray!");
@@ -116,12 +132,19 @@ fn make_channels_and_threads() -> Vec<PipelineTracker> {
                     } else {
                         work_items.push(item.file);
                     }
+                    if work_items.len() >= 100 {
+                        println!("Got enough items, time to work.");
+                        break;
+                    }
                 }
                 if work_items.len() == 0 {
+                    println!("Nothing to work on, breaking out");
                     break;
                 }
+                println!("{:?} calling SFoD with {} items.", thread::current().id(), work_items.len());
                 single_function_of_doom(&client, &work_items);
             }
+            println!("Thread {:?}, out!", thread::current().id());
         });
         let pipe = PipelineTracker {
             thread: thread,
@@ -144,7 +167,7 @@ fn compress_and_send
     let upload_request = PutObjectRequest {
         bucket: work_item.s3_bucket_name.to_owned(),
         key: work_item.s3_file_location.to_owned(),
-        body: Some(compressed_results.clone()),
+        body: Some(compressed_results),
         ..Default::default()
     };
 
@@ -155,18 +178,22 @@ fn compress_and_send
 
     match client.put_object(&upload_request) {
         Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
-        Err(e) => {
-            println!("Failed to upload {} to {}: {:?}. Retrying...", work_item.s3_file_location, work_item.s3_bucket_name, e);
-            thread::sleep(time::Duration::from_millis(8000));
+        Err(_) => {
+            thread::sleep(time::Duration::from_millis(100));
             match client.put_object(&upload_request) {
                 Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
-                Err(e) => {
-                    println!("Failed to upload {} to {}, second attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
-                    thread::sleep(time::Duration::from_millis(16000));
+                Err(_) => {
+                    thread::sleep(time::Duration::from_millis(1000));
                     match client.put_object(&upload_request) {
                         Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
-                        Err(e) => {
-                            println!("Failed to upload {} to {}, third attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
+                        Err(_) => {
+                            let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                                Region::UsEast1);
+                            match client.put_object(&upload_request) {
+                                Ok(_) => println!("uploaded {} to {} with new client", work_item.s3_file_location, work_item.s3_bucket_name),
+                                Err(e) => println!("FOURTH ATTEMPT TO UPLOAD FAILED SO SAD. {:?}", e),
+                            }
                         },
                     };
                 },
@@ -195,8 +222,11 @@ fn single_function_of_doom
                 .par_iter()
                 .map(|item| item.as_commit_event())
                 .collect();
+
+            let old_size = committer_events.len();
             committer_events.sort();
             committer_events.dedup();
+            println!("{:?}: We shrunk the pre-2015 committer events from {} to {}", thread::current().id(), old_size, committer_events.len());
 
             let sql = committer_events
                 .par_iter()
@@ -221,8 +251,11 @@ fn single_function_of_doom
                 .par_iter()
                 .map(|item| item.as_commit_event())
                 .collect();
+            
+            let old_size = committer_events.len();
             committer_events.sort();
             committer_events.dedup();
+            println!("{:?}: We shrunk the 2015+ committer events from {} to {}", thread::current().id(), old_size, committer_events.len());
 
             let sql = committer_events
                 .par_iter()
@@ -347,7 +380,7 @@ fn get_old_event_subset<P: ProvideAwsCredentials + Sync + Send,
 }
 
 fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
-    events
+    let mut repo_mappings: Vec<RepoIdToName> = events
         .par_iter()
         .map(|r| {
             // replace with r.repo_id():
@@ -355,7 +388,7 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 Some(ref repo) => repo.id,
                 None => match r.repository {
                     Some(ref repository) => repository.id,
-                    None => -1, // TODO: somehow ignore this event, as we can't use it
+                    None => -1,
                 }
             };
             let repo_name = match r.repo {
@@ -366,26 +399,89 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 }
             };
 
+            let timestamp = match DateTime::parse_from_rfc3339(&r.created_at) {
+                Ok(time) => time,
+                Err(_) => DateTime::parse_from_rfc3339("2011-01-01T21:00:09+09:00").unwrap(), // Make ourselves low priority
+            };
+
+            let utc_timestamp = DateTime::<Utc>::from_utc(timestamp.naive_utc(), Utc);
+
             RepoIdToName {
                     repo_id: repo_id,
                     repo_name: repo_name,
-                    event_timestamp: r.created_at.clone(),
+                    event_timestamp: utc_timestamp,
                 }
             }
         )
-        .collect()
-        
+        .filter(|x| x.repo_id >= 0)
+        .filter(|x| x.repo_name != "")
+        .collect();
+    // We should try to dedupe here: convert to actual timestamps instead of doing Strings for timestamps
+    // get unique list of repo ids
+    repo_mappings.sort_by_key(|x| x.repo_id);
+    let mut list_of_repo_ids: Vec<i64> = repo_mappings.iter().map(|x| x.repo_id).collect();
+    list_of_repo_ids.sort();
+    list_of_repo_ids.dedup();
+    // for each repo id, find the entry with the most recent timestamp
+    let a: Vec<RepoIdToName> = list_of_repo_ids
+        .iter()
+        .map(|repo_id| {
+            // find most up to date entry for this one
+            let mut all_entries_for_repo_id: Vec<RepoIdToName> = repo_mappings
+                .iter()
+                .filter(|x| x.repo_id == *repo_id)
+                .map(|x| x.clone())
+                .collect();
+            all_entries_for_repo_id.sort_by_key(|x| x.event_timestamp);
+            // println!("sorted: {:#?}", all_entries_for_repo_id);
+            all_entries_for_repo_id.last().unwrap().clone()
+        })
+        .collect();
+
+    // collect and return those most recent timestamp ones
+    // println!("repo mappings after dedupin': {:#?}", a);
+    println!("pre-2015 len difference: {:?} to {:?}", repo_mappings.len(), a.len());
+    a
 }
 
+// We should add some testing on this
 fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
-    events
+    let mut repo_mappings: Vec<RepoIdToName> = events
         .par_iter()
         .map(|r| RepoIdToName {
                 repo_id: r.repo.id,
                 repo_name: r.repo.name.clone(),
                 event_timestamp: r.created_at.clone(),
             })
-        .collect()
+        .collect();
+
+    // println!("repo mappings at first: {:#?}", repo_mappings);
+
+    // get unique list of repo ids
+    repo_mappings.sort_by_key(|x| x.repo_id);
+    let mut list_of_repo_ids: Vec<i64> = repo_mappings.par_iter().map(|x| x.repo_id).collect();
+    list_of_repo_ids.sort();
+    list_of_repo_ids.dedup();
+    // for each repo id, find the entry with the most recent timestamp
+    let a: Vec<RepoIdToName> = list_of_repo_ids
+        .par_iter()
+        .map(|repo_id| {
+            // find most up to date entry for this one
+            let mut all_entries_for_repo_id: Vec<RepoIdToName> = repo_mappings
+                .iter()
+                .filter(|x| x.repo_id == *repo_id)
+                .map(|x| x.clone())
+                .collect();
+            all_entries_for_repo_id.sort_by_key(|x| x.event_timestamp);
+            // println!("sorted: {:#?}", all_entries_for_repo_id);
+            all_entries_for_repo_id.last().unwrap().clone()
+        })
+        .collect();
+
+    // collect and return those most recent timestamp ones
+    // println!("repo mappings after dedupin': {:#?}", a);
+    println!("len difference: {:?} to {:?}", repo_mappings.len(), a.len());
+    a
 }
 
 #[derive(Debug, Clone)]
@@ -435,4 +531,63 @@ lazy_static! {
     static ref YEAR: i32 = {
         env::var("GHAYEAR").expect("Please set GHAYEAR env var").parse::<i32>().expect("Please set GHAYEAR env var to an integer value.")
     };
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn reduce_works() {
+        use repo_id_to_name_mappings;
+        use rusty_von_humboldt::RepoIdToName;
+        use rusty_von_humboldt::types::Event;
+        use chrono::{TimeZone, Utc};
+
+        let most_newest_timestamp = Utc.ymd(2014, 7, 8).and_hms(9, 10, 11);
+        let an_older_timestamp = Utc.ymd(2014, 7, 8).and_hms(0, 10, 11);
+
+        let mut expected: Vec<RepoIdToName> = Vec::new();
+        expected.push(RepoIdToName {
+            repo_id: 5,
+            repo_name: "new".to_string(),
+            event_timestamp: most_newest_timestamp,
+        });
+
+        let mut input = Vec::new();
+        
+        let mut foo = Event::new();
+        foo.repo.id = 5;
+        foo.repo.name = "old".to_string();
+        foo.created_at = an_older_timestamp;
+        input.push(foo);
+
+        foo = Event::new();
+        foo.repo.id = 5;
+        foo.repo.name = "new".to_string();
+        foo.created_at = most_newest_timestamp;
+        input.push(foo);
+
+        assert_eq!(expected, repo_id_to_name_mappings(&input));
+    }
+
+    // mostly a test for playing with the different timestamps in pre-2015 events
+    #[test]
+    fn timestamp_parsing() {
+        use chrono::{DateTime, Utc};
+        let style_one = "2013-01-01T12:00:24-08:00";
+        let style_two = "2011-05-01T15:59:59Z";
+
+        match DateTime::parse_from_rfc3339(style_one) {
+            Ok(time) => println!("got {:?} from {:?}", time, style_one),
+            Err(e) => println!("Failed to get anything from {:?}. Error: {:?}", style_one, e),
+        }
+
+        match DateTime::parse_from_rfc3339(style_two) {
+            Ok(time) => println!("got {:?} from {:?}", time, style_two),
+            Err(e) => println!("Failed to get anything from {:?}. Error: {:?}", style_two, e),
+        }
+
+        let localtime = DateTime::parse_from_rfc3339(style_two).unwrap();
+        let _utc: DateTime<Utc> = DateTime::<Utc>::from_utc(localtime.naive_utc(), Utc);
+    }
 }
