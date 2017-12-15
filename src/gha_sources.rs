@@ -90,8 +90,8 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 }
 
 pub fn download_and_parse_old_file
-    <P: ProvideAwsCredentials,
-    D: DispatchSignedRequest>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Pre2015Event>, String> {
+    <P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Pre2015Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
 
     let get_req = GetObjectRequest {
@@ -102,24 +102,33 @@ pub fn download_and_parse_old_file
 
     let result = match client.get_object(&get_req) {
         Ok(s3_result) => s3_result,
-        Err(err) => {
-            println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
-            thread::sleep(time::Duration::from_millis(8000));
+        Err(_) => {
+            // println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
                 Err(err) => {
-                    println!("Failed to get {:?} from S3, second attempt.", file_on_s3);
-                    return Err(format!("{:?}", err));
+                    println!("Failed to get {:?} from S3, second attempt: {:?}", file_on_s3, err);
+                    thread::sleep(time::Duration::from_millis(1000));
+                    match client.get_object(&get_req) {
+                        Ok(s3_result) => s3_result,
+                        Err(err) => {
+                            println!("Failed to get {:?} from S3, third attempt: {:?}", file_on_s3, err);
+                            return Err(format!("{:?}", err));
+                        },
+                    }
                 },
             }
         }
     };
-    let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
+
+    let decoder = GzDecoder::new(result.body.expect("body should be preset")).expect("Couldn't make a decoder");
     parse_ze_file_2014_older(BufReader::new(decoder))
 }
 
-pub fn download_and_parse_file<P: ProvideAwsCredentials,
-    D: DispatchSignedRequest>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Event>, String> {
+pub fn download_and_parse_file
+    <P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
 
     let get_req = GetObjectRequest {
@@ -130,15 +139,21 @@ pub fn download_and_parse_file<P: ProvideAwsCredentials,
 
     let result = match client.get_object(&get_req) {
         Ok(s3_result) => s3_result,
-        Err(err) => {
-            println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
-            let three_seconds = time::Duration::from_millis(8000);
-            thread::sleep(three_seconds);
+        Err(_) => {
+            // println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+            thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
                 Err(err) => {
-                    println!("Failed to get {:?} from S3, second attempt.", file_on_s3);
-                    return Err(format!("{:?}", err));
+                    println!("Failed to get {:?} from S3, second attempt: {:?}", file_on_s3, err);
+                    thread::sleep(time::Duration::from_millis(1000));
+                    match client.get_object(&get_req) {
+                        Ok(s3_result) => s3_result,
+                        Err(err) => {
+                            println!("Failed to get {:?} from S3, Third attempt: {:?}", file_on_s3, err);
+                            return Err(format!("{:?}", err));
+                        },
+                    }
                 },
             }
         }

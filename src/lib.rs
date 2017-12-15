@@ -4,7 +4,7 @@ extern crate serde;
 extern crate serde_json;
 extern crate rusoto_core;
 extern crate rusoto_s3;
-extern crate void;
+extern crate lazy_static;
 
 pub mod types;
 pub use types::*;
