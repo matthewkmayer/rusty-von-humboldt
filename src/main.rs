@@ -149,7 +149,7 @@ fn compress_and_send
     };
 
     if MODE.dry_run {
-        println!("Not uploading to S3, it's a dry run.");
+        println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
         return;
     }
 

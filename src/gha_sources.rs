@@ -102,8 +102,8 @@ pub fn download_and_parse_old_file
 
     let result = match client.get_object(&get_req) {
         Ok(s3_result) => s3_result,
-        Err(err) => {
-            println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+        Err(_) => {
+            // println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
@@ -139,8 +139,8 @@ pub fn download_and_parse_file
 
     let result = match client.get_object(&get_req) {
         Ok(s3_result) => s3_result,
-        Err(err) => {
-            println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
+        Err(_) => {
+            // println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
