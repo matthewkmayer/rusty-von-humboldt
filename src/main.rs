@@ -102,7 +102,7 @@ fn make_channels_and_threads() -> Vec<PipelineTracker> {
                 let mut work_items: Vec<String> = Vec::new();
                 // this loop does the accumulation of items to download, parse, convert, compress, upload:
                 loop {
-                    if work_items.len() >= 5 {
+                    if work_items.len() >= 50 {
                         break;
                     }
                     let item: FileWorkItem = match recv.recv() {
