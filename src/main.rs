@@ -358,7 +358,7 @@ fn get_old_event_subset<P: ProvideAwsCredentials + Sync + Send,
 }
 
 fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
-    events
+    let mut repo_mappings: Vec<RepoIdToName> = events
         .par_iter()
         .map(|r| {
             // replace with r.repo_id():
@@ -366,7 +366,7 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 Some(ref repo) => repo.id,
                 None => match r.repository {
                     Some(ref repository) => repository.id,
-                    None => -1, // TODO: somehow ignore this event, as we can't use it
+                    None => -1,
                 }
             };
             let repo_name = match r.repo {
@@ -377,15 +377,12 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 }
             };
 
-            // convert created_at to chrono something.
             let timestamp = match DateTime::parse_from_rfc3339(&r.created_at) {
                 Ok(time) => time,
                 Err(_) => DateTime::parse_from_rfc3339("2011-01-01T21:00:09+09:00").unwrap(), // Make ourselves low priority
             };
 
             let utc_timestamp = DateTime::<Utc>::from_utc(timestamp.naive_utc(), Utc);
-
-            println!("Converted {:?} to {:?}", r.created_at, utc_timestamp);
 
             RepoIdToName {
                     repo_id: repo_id,
@@ -394,9 +391,35 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 }
             }
         )
-        // filter out repo_name == "" or repo_id = -1
-        .collect()
+        .filter(|x| x.repo_id >= 0)
+        .filter(|x| x.repo_name != "")
+        .collect();
     // We should try to dedupe here: convert to actual timestamps instead of doing Strings for timestamps
+    // get unique list of repo ids
+    repo_mappings.sort_by_key(|x| x.repo_id);
+    let mut list_of_repo_ids: Vec<i64> = repo_mappings.iter().map(|x| x.repo_id).collect();
+    list_of_repo_ids.sort();
+    list_of_repo_ids.dedup();
+    // for each repo id, find the entry with the most recent timestamp
+    let a: Vec<RepoIdToName> = list_of_repo_ids
+        .iter()
+        .map(|repo_id| {
+            // find most up to date entry for this one
+            let mut all_entries_for_repo_id: Vec<RepoIdToName> = repo_mappings
+                .iter()
+                .filter(|x| x.repo_id == *repo_id)
+                .map(|x| x.clone())
+                .collect();
+            all_entries_for_repo_id.sort_by_key(|x| x.event_timestamp);
+            // println!("sorted: {:#?}", all_entries_for_repo_id);
+            all_entries_for_repo_id.last().unwrap().clone()
+        })
+        .collect();
+
+    // collect and return those most recent timestamp ones
+    // println!("repo mappings after dedupin': {:#?}", a);
+    println!("pre-2015 len difference: {:?} to {:?}", repo_mappings.len(), a.len());
+    a
 }
 
 // We should add some testing on this
