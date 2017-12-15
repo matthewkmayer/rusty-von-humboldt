@@ -87,23 +87,40 @@ fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
 
 fn make_channels_and_threads() -> Vec<PipelineTracker> {
     let mut pipes: Vec<PipelineTracker> = Vec::new();
-    let num_threads = 4; // use num_cpus here?
+    let num_threads = 4;
     for _x in 0..num_threads {
         let (send, recv) = sync_channel(2);
         let thread = thread::spawn(move|| {
             let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
                 Region::UsEast1);
+            let mut wrap_things_up = false;
             loop {
-                let item: FileWorkItem = match recv.recv() {
-                    Ok(i) => i,
-                    Err(_) => continue,
-                };
-                if item.no_more_work {
-                    println!("No more work, hooray!");
-                    return;
+                if wrap_things_up {
+                    break;
                 }
-                single_function_of_doom(&client, &vec![item.file]);
+                let mut work_items: Vec<String> = Vec::new();
+                // this loop does the accumulation of items to download, parse, convert, compress, upload:
+                loop {
+                    if work_items.len() >= 5 {
+                        break;
+                    }
+                    let item: FileWorkItem = match recv.recv() {
+                        Ok(i) => i,
+                        Err(_) => panic!("receiving error"), // was continue
+                    };
+                    if item.no_more_work {
+                        println!("No more work, hooray!");
+                        wrap_things_up = true;
+                        break;
+                    } else {
+                        work_items.push(item.file);
+                    }
+                }
+                if work_items.len() == 0 {
+                    break;
+                }
+                single_function_of_doom(&client, &work_items);
             }
         });
         let pipe = PipelineTracker {
@@ -145,6 +162,13 @@ fn compress_and_send
                 Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
                 Err(e) => {
                     println!("Failed to upload {} to {}, second attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
+                    thread::sleep(time::Duration::from_millis(16000));
+                    match client.put_object(&upload_request) {
+                        Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
+                        Err(e) => {
+                            println!("Failed to upload {} to {}, third attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
+                        },
+                    };
                 },
             };
         }
