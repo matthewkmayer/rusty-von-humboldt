@@ -107,13 +107,13 @@ pub fn download_and_parse_old_file
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
-                Err(_) => {
-                    println!("Failed to get {:?} from S3, second attempt.", file_on_s3);
+                Err(err) => {
+                    println!("Failed to get {:?} from S3, second attempt: {:?}", file_on_s3, err);
                     thread::sleep(time::Duration::from_millis(1000));
                     match client.get_object(&get_req) {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
-                            println!("Failed to get {:?} from S3, third attempt.", file_on_s3);
+                            println!("Failed to get {:?} from S3, third attempt: {:?}", file_on_s3, err);
                             return Err(format!("{:?}", err));
                         },
                     }
@@ -144,13 +144,13 @@ pub fn download_and_parse_file
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
-                Err(_) => {
-                    println!("Failed to get {:?} from S3, second attempt.", file_on_s3);
+                Err(err) => {
+                    println!("Failed to get {:?} from S3, second attempt: {:?}", file_on_s3, err);
                     thread::sleep(time::Duration::from_millis(1000));
                     match client.get_object(&get_req) {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
-                            println!("Failed to get {:?} from S3, Third attempt.", file_on_s3);
+                            println!("Failed to get {:?} from S3, Third attempt: {:?}", file_on_s3, err);
                             return Err(format!("{:?}", err));
                         },
                     }

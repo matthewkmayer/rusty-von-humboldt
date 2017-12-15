@@ -204,7 +204,7 @@ fn single_function_of_doom
                 .collect::<Vec<String>>()
                 .join("");
 
-            let file_name = format!("rvh/{}/{:x}", generate_mode_string(), md5::compute(&sql));
+            let file_name = format!("rvh/{}/{}/{:x}.txt.gz", generate_mode_string(), *YEAR, md5::compute(&sql));
 
             let workitem = WorkItem {
                 sql: sql,
@@ -230,7 +230,7 @@ fn single_function_of_doom
                 .collect::<Vec<String>>()
                 .join("");
 
-            let file_name = format!("rvh/{}/{:x}", generate_mode_string(), md5::compute(&sql));
+            let file_name = format!("rvh/{}/{}/{:x}.txt.gz", generate_mode_string(), *YEAR, md5::compute(&sql));
 
             let workitem = WorkItem {
                 sql: sql,
