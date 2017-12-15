@@ -11,6 +11,7 @@ extern crate rand;
 extern crate md5;
 #[macro_use]
 extern crate lazy_static;
+extern crate chrono;
 
 use std::io::prelude::*;
 use std::env;
@@ -21,6 +22,7 @@ use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use chrono::{DateTime, TimeZone, Utc};
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
@@ -375,10 +377,33 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 }
             };
 
+            // // convert created_at to chrono something.
+            // let timestamp = match DateTime::parse_from_rfc2822(&r.created_at) {
+            //     Ok(time) => time,
+            //     Err(_) => {
+            //         match DateTime::parse_from_rfc3339(&r.created_at) {
+            //             Ok(time) => time,
+            //             Err(_) => {
+            //                 println!("\nCouldn't get {:?} converted to either rfc 2822 or 3339.\n", r.created_at);
+            //                 panic!(format!("Couldn't convert {:?} to either rfc 2822 or 3339", r.created_at));
+            //             },
+            //         }
+            //     },
+            // };
+
+            // let utc_timestamp = match timestamp.to_string().parse::<DateTime<Utc>>() {
+            //     Ok(time) => time,
+            //     Err(e) => panic!("couldn't make utc timestampe from {:?}: {:?}", timestamp, e),
+            // };
+
+            // println!("Converted {:?} to {:?}", r.created_at, utc_timestamp);
+
+            panic!("Faking utc timestamp, fix this before running");
+
             RepoIdToName {
                     repo_id: repo_id,
                     repo_name: repo_name,
-                    event_timestamp: r.created_at.clone(),
+                    event_timestamp: Utc::now(),
                 }
             }
         )
@@ -387,17 +412,44 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
     // We should try to dedupe here: convert to actual timestamps instead of doing Strings for timestamps
 }
 
+// We should add some testing on this
 fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
-    events
+    let mut repo_mappings: Vec<RepoIdToName> = events
         .par_iter()
         .map(|r| RepoIdToName {
                 repo_id: r.repo.id,
                 repo_name: r.repo.name.clone(),
                 event_timestamp: r.created_at.clone(),
             })
-        .collect()
+        .collect();
 
-    // We should try to dedupe here: convert to actual timestamps instead of doing Strings for timestamps
+    // println!("repo mappings at first: {:#?}", repo_mappings);
+
+    // get unique list of repo ids
+    repo_mappings.sort_by_key(|x| x.repo_id);
+    let mut list_of_repo_ids: Vec<i64> = repo_mappings.iter().map(|x| x.repo_id).collect();
+    list_of_repo_ids.sort();
+    list_of_repo_ids.dedup();
+    // for each repo id, find the entry with the most recent timestamp
+    let a: Vec<RepoIdToName> = list_of_repo_ids
+        .iter()
+        .map(|repo_id| {
+            // find most up to date entry for this one
+            let mut all_entries_for_repo_id: Vec<RepoIdToName> = repo_mappings
+                .iter()
+                .filter(|x| x.repo_id == *repo_id)
+                .map(|x| x.clone())
+                .collect();
+            all_entries_for_repo_id.sort_by_key(|x| x.event_timestamp);
+            // println!("sorted: {:#?}", all_entries_for_repo_id);
+            all_entries_for_repo_id.last().unwrap().clone()
+        })
+        .collect();
+
+    // collect and return those most recent timestamp ones
+    // println!("repo mappings after dedupin': {:#?}", a);
+    println!("len difference: {:?} to {:?}", repo_mappings.len(), a.len());
+    a
 }
 
 #[derive(Debug, Clone)]
@@ -429,8 +481,8 @@ struct FileWorkItem {
 
 lazy_static! {
     static ref MODE: Mode = Mode { 
-        committer_count: true,
-        repo_mapping: false,
+        committer_count: false,
+        repo_mapping: true,
         dry_run: {
             match env::var("DRYRUN"){
                 Ok(dryrun) => match bool::from_str(&dryrun) {

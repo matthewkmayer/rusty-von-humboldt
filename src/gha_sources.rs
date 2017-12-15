@@ -162,7 +162,6 @@ pub fn download_and_parse_file
     parse_ze_file_2015_newer(BufReader::new(decoder))
 }
 
-
 fn parse_ze_file_2014_older<R: BufRead>(mut contents: R) -> Result<Vec<Pre2015Event>, String> {
     let mut events: Vec<Pre2015Event> = Vec::new();
     let mut line = String::new();

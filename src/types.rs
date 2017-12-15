@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 use serde::de::{self, Deserialize, Deserializer};
 use serde_json::Value;
+use chrono::{DateTime, TimeZone, Utc};
 
 // TODO: sort file as source event types then mapped types.
 
@@ -63,7 +64,7 @@ pub struct Payload {
 pub struct Event {
     #[serde(deserialize_with = "from_str")]
     pub id: i64,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
     #[serde(rename = "type")]
     pub event_type: String,
     pub actor: Actor,
@@ -201,7 +202,7 @@ impl Event {
                 name: "n/a".to_string(),
             },
             payload: None,
-            created_at: "".to_string(),
+            created_at: Utc.ymd(2010, 1, 1).and_hms(0, 0, 0),
         }
     }
 
@@ -268,7 +269,7 @@ pub struct PrByActor {
 pub struct RepoIdToName {
     pub repo_id: i64,
     pub repo_name: String,
-    pub event_timestamp: String,
+    pub event_timestamp: DateTime<Utc>,
 }
 
 impl RepoIdToName {
