@@ -80,14 +80,14 @@ fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
         }
         // print how many ingest files we've sent off so far
         if i % 20 == 0 {
-            println!("Processed {} files.", i);
+            println!("Distributed {} files to process.", i);
         }
     }
 }
 
 fn make_channels_and_threads() -> Vec<PipelineTracker> {
     let mut pipes: Vec<PipelineTracker> = Vec::new();
-    let num_threads = 4;
+    let num_threads = 2;
     for _x in 0..num_threads {
         let (send, recv) = sync_channel(2);
         let thread = thread::spawn(move|| {
@@ -95,14 +95,17 @@ fn make_channels_and_threads() -> Vec<PipelineTracker> {
                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
                 Region::UsEast1);
             let mut wrap_things_up = false;
+            let mut work_items: Vec<String> = Vec::new();
             loop {
                 if wrap_things_up {
                     break;
                 }
-                let mut work_items: Vec<String> = Vec::new();
+                work_items.clear();
                 // this loop does the accumulation of items to download, parse, convert, compress, upload:
                 loop {
-                    if work_items.len() >= 50 {
+                    // This is how much each thread crams together at once.  Bigger numbers mean more
+                    // deduplication but more memory usage.
+                    if work_items.len() >= 300 {
                         break;
                     }
                     let item: FileWorkItem = match recv.recv() {
@@ -195,8 +198,11 @@ fn single_function_of_doom
                 .par_iter()
                 .map(|item| item.as_commit_event())
                 .collect();
+
+            let old_size = committer_events.len();
             committer_events.sort();
             committer_events.dedup();
+            println!("We shrunk the pre-2015 committer events from {} to {}", old_size, committer_events.len());
 
             let sql = committer_events
                 .par_iter()
@@ -221,8 +227,11 @@ fn single_function_of_doom
                 .par_iter()
                 .map(|item| item.as_commit_event())
                 .collect();
+            
+            let old_size = committer_events.len();
             committer_events.sort();
             committer_events.dedup();
+            println!("We shrunk the 2015+ committer events from {} to {}", old_size, committer_events.len());
 
             let sql = committer_events
                 .par_iter()
@@ -373,8 +382,9 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
                 }
             }
         )
+        // filter out repo_name == "" or repo_id = -1
         .collect()
-        
+    // We should try to dedupe here: convert to actual timestamps instead of doing Strings for timestamps
 }
 
 fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
@@ -386,6 +396,8 @@ fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
                 event_timestamp: r.created_at.clone(),
             })
         .collect()
+
+    // We should try to dedupe here: convert to actual timestamps instead of doing Strings for timestamps
 }
 
 #[derive(Debug, Clone)]
