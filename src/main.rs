@@ -89,7 +89,7 @@ fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
 
 fn make_channels_and_threads() -> Vec<PipelineTracker> {
     let mut pipes: Vec<PipelineTracker> = Vec::new();
-    let num_threads = 2;
+    let num_threads = 4;
     for _x in 0..num_threads {
         let (send, recv) = sync_channel(2);
         let thread = thread::spawn(move|| {
@@ -162,16 +162,23 @@ fn compress_and_send
         Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
         Err(e) => {
             println!("Failed to upload {} to {}: {:?}. Retrying...", work_item.s3_file_location, work_item.s3_bucket_name, e);
-            thread::sleep(time::Duration::from_millis(8000));
+            thread::sleep(time::Duration::from_millis(4000));
             match client.put_object(&upload_request) {
                 Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
                 Err(e) => {
                     println!("Failed to upload {} to {}, second attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
-                    thread::sleep(time::Duration::from_millis(16000));
+                    thread::sleep(time::Duration::from_millis(8000));
                     match client.put_object(&upload_request) {
                         Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
                         Err(e) => {
                             println!("Failed to upload {} to {}, third attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
+                            let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                                Region::UsEast1);
+                            match client.put_object(&upload_request) {
+                                Ok(_) => println!("uploaded {} to {} with new client", work_item.s3_file_location, work_item.s3_bucket_name),
+                                Err(e) => println!("FOURTH ATTEMPT TO UPLOAD FAILED SO SAD. {:?}", e),
+                            }
                         },
                     };
                 },
@@ -437,12 +444,12 @@ fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
 
     // get unique list of repo ids
     repo_mappings.sort_by_key(|x| x.repo_id);
-    let mut list_of_repo_ids: Vec<i64> = repo_mappings.iter().map(|x| x.repo_id).collect();
+    let mut list_of_repo_ids: Vec<i64> = repo_mappings.par_iter().map(|x| x.repo_id).collect();
     list_of_repo_ids.sort();
     list_of_repo_ids.dedup();
     // for each repo id, find the entry with the most recent timestamp
     let a: Vec<RepoIdToName> = list_of_repo_ids
-        .iter()
+        .par_iter()
         .map(|repo_id| {
             // find most up to date entry for this one
             let mut all_entries_for_repo_id: Vec<RepoIdToName> = repo_mappings
@@ -491,8 +498,8 @@ struct FileWorkItem {
 
 lazy_static! {
     static ref MODE: Mode = Mode { 
-        committer_count: false,
-        repo_mapping: true,
+        committer_count: true,
+        repo_mapping: false,
         dry_run: {
             match env::var("DRYRUN"){
                 Ok(dryrun) => match bool::from_str(&dryrun) {
