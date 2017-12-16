@@ -43,7 +43,7 @@ fn pipeline_main() {
 }
 
 fn wait_for_threads(pipes: Vec<PipelineTracker>) {
-    for pipe in pipes {
+    for pipe in pipes.iter() {
         let done_signal = FileWorkItem {
             file: String::new(),
             no_more_work: true,
@@ -52,6 +52,8 @@ fn wait_for_threads(pipes: Vec<PipelineTracker>) {
             Ok(_) => (),
             Err(e) => println!("Couldn't send to channel: {}", e),
         }
+    }
+    for pipe in pipes {
         match pipe.thread.join() {
             Ok(_) => println!("Pipe thread all wrapped up."),
             Err(e) => println!("Pipe thread didn't want to quit: {:?}", e),
@@ -162,12 +164,12 @@ fn compress_and_send
         Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
         Err(e) => {
             println!("Failed to upload {} to {}: {:?}. Retrying...", work_item.s3_file_location, work_item.s3_bucket_name, e);
-            thread::sleep(time::Duration::from_millis(4000));
+            thread::sleep(time::Duration::from_millis(1000));
             match client.put_object(&upload_request) {
                 Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
                 Err(e) => {
                     println!("Failed to upload {} to {}, second attempt: {:?}", work_item.s3_file_location, work_item.s3_bucket_name, e);
-                    thread::sleep(time::Duration::from_millis(8000));
+                    thread::sleep(time::Duration::from_millis(2000));
                     match client.put_object(&upload_request) {
                         Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
                         Err(e) => {
