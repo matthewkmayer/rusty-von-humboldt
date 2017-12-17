@@ -1,3 +1,6 @@
+#![feature(test)]
+extern crate test;
+
 extern crate rusty_von_humboldt;
 
 extern crate serde;
@@ -522,6 +525,45 @@ lazy_static! {
 
 #[cfg(test)]
 mod tests {
+    // use super::*;
+    use test::Bencher;
+
+    #[bench]
+    fn straight_bytes(b: &mut Bencher) {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        let mut work_item = String::new();
+        for x in 0..10000 {
+            work_item.push_str(&format!("blah blah totally SQL stuff for {}.  Lots of SQL, the best SQL, etc...", x));
+        }
+        b.iter(|| {
+            let mut encoder = GzEncoder::new(Vec::with_capacity(1000), Compression::default());
+            encoder.write_all(work_item.as_bytes()).expect("encoding failed");
+            encoder.finish().expect("Couldn't compress file, sad.")
+        });
+    }
+
+    #[bench]
+    fn bufreader_on_bytes(b: &mut Bencher) {
+        use flate2::Compression;
+        use flate2::bufread::GzEncoder;
+        use std::io::Read;
+        use std::io::BufReader;
+
+        let mut work_item = String::new();
+        for x in 0..10000 {
+            work_item.push_str(&format!("blah blah totally SQL stuff for {}.  Lots of SQL, the best SQL, etc...", x));
+        }
+        b.iter(|| {
+            let ar = &work_item.as_bytes()[..];
+            let buf = BufReader::new(ar);
+            let mut encoder = GzEncoder::new(buf, Compression::default());
+            let mut compressed_results = Vec::with_capacity(50000);
+            encoder.read_to_end(&mut compressed_results)
+        });
+    }
 
     #[test]
     fn reduce_works() {
