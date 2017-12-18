@@ -103,18 +103,24 @@ pub fn download_and_parse_old_file
     let result = match client.get_object(&get_req) {
         Ok(s3_result) => s3_result,
         Err(_) => {
-            // println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
-                Err(err) => {
-                    println!("Failed to get {:?} from S3, second attempt: {:?}", file_on_s3, err);
+                Err(_) => {
                     thread::sleep(time::Duration::from_millis(1000));
                     match client.get_object(&get_req) {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
-                            println!("Failed to get {:?} from S3, third attempt: {:?}", file_on_s3, err);
-                            return Err(format!("{:?}", err));
+                            println!("Failed to get {:?} from S3, Third attempt: {:?}", file_on_s3, err);
+                            let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                                Region::UsEast1);
+                            match client.get_object(&get_req) {
+                                Ok(s3_result) => s3_result,
+                                Err(err) => {
+                                    return Err(format!("{:?}", err));
+                                }
+                            }
                         },
                     }
                 },
@@ -151,7 +157,15 @@ pub fn download_and_parse_file
                         Ok(s3_result) => s3_result,
                         Err(err) => {
                             println!("Failed to get {:?} from S3, Third attempt: {:?}", file_on_s3, err);
-                            return Err(format!("{:?}", err));
+                            let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                                Region::UsEast1);
+                            match client.get_object(&get_req) {
+                                Ok(s3_result) => s3_result,
+                                Err(err) => {
+                                    return Err(format!("{:?}", err));
+                                }
+                            }
                         },
                     }
                 },
@@ -161,7 +175,6 @@ pub fn download_and_parse_file
     let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
     parse_ze_file_2015_newer(BufReader::new(decoder))
 }
-
 
 fn parse_ze_file_2014_older<R: BufRead>(mut contents: R) -> Result<Vec<Pre2015Event>, String> {
     let mut events: Vec<Pre2015Event> = Vec::new();
