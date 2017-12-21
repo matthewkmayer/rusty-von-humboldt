@@ -125,7 +125,7 @@ fn do_repo_work_son
     D: DispatchSignedRequest + Sync + Send>
     (recv: std::sync::mpsc::Receiver<EventWorkItem>, client: S3Client<P, D>, dest_bucket: String) {
 
-    let events_to_hold = 7000000;
+    let events_to_hold = 9000000;
     let mut wrap_things_up = false;
     let mut repo_mappings: Vec<RepoIdToName> = Vec::with_capacity(events_to_hold);
     let mut sql_collector: Vec<String> = Vec::new();
@@ -174,14 +174,11 @@ fn do_repo_work_son
         repo_mappings.sort();
         repo_mappings.dedup();
         println!("{:?}: We shrunk the repo events from {} to {}", thread::current().id(), old_size, repo_mappings.len());
-
         println!("Converting to sql");
-        // Can we chunk this into sections? While take(500,000) format sql, as bytes, compress, send to s3
-
         let mut inner_index = 1;
 
         repo_mappings
-            .chunks(500000)
+            .chunks(1000000)
             .for_each(|chunk| {
                 chunk
                     .par_iter()
@@ -206,7 +203,7 @@ fn do_repo_work_son
                 let upload_request = PutObjectRequest {
                     bucket: dest_bucket.clone(),
                     key: file_name.to_owned(),
-                    body: Some(compressed_results.to_vec()),
+                    body: Some(compressed_results),
                     ..Default::default()
                 };
 
@@ -214,30 +211,12 @@ fn do_repo_work_son
                     println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
                 } else {
                     println!("Uploading to S3.");
-                    match client.put_object(&upload_request) {
-                        Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
-                        Err(_) => {
-                            println!("failed to upload to s3, boo");
-                            thread::sleep(time::Duration::from_millis(100));
-                            match client.put_object(&upload_request) {
-                                Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
-                                Err(_) => {
-                                    thread::sleep(time::Duration::from_millis(1000));
-                                    match client.put_object(&upload_request) {
-                                        Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
-                                        Err(_) => {
-                                            let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                    let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
                                                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
                                                 Region::UsEast1);
-                                            match client.put_object(&upload_request) {
-                                                Ok(_) => println!("uploaded {} to {} with new client", upload_request.key, upload_request.bucket),
-                                                Err(e) => println!("FOURTH ATTEMPT TO UPLOAD FAILED SO SAD. {:?}", e),
-                                            }
-                                        },
-                                    };
-                                },
-                            };
-                        }
+                    match client.put_object(&upload_request) {
+                        Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
+                        Err(_) => println!("Whoops, couldn't upload {}", upload_request.key),
                     }
                 }
             }) 
@@ -322,7 +301,7 @@ fn do_work_son
         let upload_request = PutObjectRequest {
             bucket: dest_bucket.clone(),
             key: file_name.to_owned(),
-            body: Some(compressed_results.to_vec()),
+            body: Some(compressed_results),
             ..Default::default()
         };
         {
@@ -334,7 +313,6 @@ fn do_work_son
             match client.put_object(&upload_request) {
                 Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
                 Err(_) => {
-                    println!("failed to upload to s3, boo");
                     thread::sleep(time::Duration::from_millis(100));
                     match client.put_object(&upload_request) {
                         Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
