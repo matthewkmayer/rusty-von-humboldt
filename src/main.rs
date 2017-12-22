@@ -229,13 +229,14 @@ fn do_work_son
     D: DispatchSignedRequest + Sync + Send>
     (recv: std::sync::mpsc::Receiver<EventWorkItem>, client: S3Client<P, D>, dest_bucket: String) {
 
+    // bump this higher
     let events_to_hold = 6000000;
     let mut wrap_things_up = false;
     let mut committer_events: Vec<CommitEvent> = Vec::new();
     let mut sql_collector: Vec<String> = Vec::new();
     let mut sql_bytes: Vec<u8> = Vec::new();
     let mut index = 0;
-    // TODO: handle pre-2015 events
+
     loop {
         index += 1;
         committer_events.clear();
@@ -245,7 +246,7 @@ fn do_work_son
             println!("wrapping thread up.");
             break;
         }
-        // fetch work loop: 
+
         loop {
             let item: EventWorkItem = match recv.recv() {
                 Ok(i) => i,
@@ -253,6 +254,7 @@ fn do_work_son
                     panic!("receiving error");
                 },
             };
+            // convert to something like 1/10 of the max amount
             if committer_events.len() % 200000 == 0 {
                 println!("number of work items: {}", committer_events.len());
                 let old_size = committer_events.len();
@@ -264,8 +266,7 @@ fn do_work_son
                 wrap_things_up = true;
                 break;
             } else {
-                committer_events.push(item.event.as_commit_event());
-                // work_items.push(item.event);                
+                committer_events.push(item.event.as_commit_event()); 
             }
             if committer_events.len() == events_to_hold {
                 println!("\n\n\nWe got enough work to do!\n\n");
@@ -305,6 +306,8 @@ fn do_work_son
             body: Some(compressed_results),
             ..Default::default()
         };
+
+        // switch to chunks, create new S3 client erry time:
         {
             if MODE.dry_run {
                 println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
