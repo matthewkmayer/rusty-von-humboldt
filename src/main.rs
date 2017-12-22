@@ -39,7 +39,7 @@ fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
     let mut file_list = make_list();
-    let (send, recv) = sync_channel(5000);
+    let (send, recv) = sync_channel(500000);
 
     let thread = thread::spawn(move|| { 
         let thread_client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
@@ -125,7 +125,7 @@ fn do_repo_work_son
     D: DispatchSignedRequest + Sync + Send>
     (recv: std::sync::mpsc::Receiver<EventWorkItem>, client: S3Client<P, D>, dest_bucket: String) {
 
-    let events_to_hold = 9000000;
+    let events_to_hold = 15000000;
     let mut wrap_things_up = false;
     let mut repo_mappings: Vec<RepoIdToName> = Vec::with_capacity(events_to_hold);
     let mut sql_collector: Vec<String> = Vec::new();
@@ -149,7 +149,8 @@ fn do_repo_work_son
                     panic!("receiving error");
                 },
             };
-            if repo_mappings.len() % 200000 == 0 {
+            if repo_mappings.len() % 2000000 == 0 {
+                println!("Repo mapping size: {}", repo_mappings.len());
                 // println!("number of work items: {}", repo_mappings.len());
                 let old_size = repo_mappings.len();
                 repo_mappings.sort();
