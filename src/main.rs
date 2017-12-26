@@ -574,7 +574,7 @@ mod tests {
         let mut collector: Vec<Event> = Vec::new();
         // 9 million items is ~1.6 GB of RAM
         // 55 million items was ~8 GB
-        for i in 0..95000000 {
+        for i in 0..95000 {
             let mut event = Event::new();
             event.repo.id = i;
             event.repo.name = "hi".to_string();
