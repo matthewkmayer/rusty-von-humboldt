@@ -202,7 +202,7 @@ fn do_repo_work_son
 
         let old_size = repo_mappings.len();
         repo_mappings.sort();
-        repo_mappings.dedup();
+        repo_mappings.dedup(); // TODO: this should be dudupe by key as above
         println!("{:?}: We shrunk the repo events from {} to {}", thread::current().id(), old_size, repo_mappings.len());
         println!("Converting to sql");
         let mut inner_index = 1;
@@ -451,112 +451,6 @@ fn get_old_event_subset<P: ProvideAwsCredentials + Sync + Send,
         .collect()
 }
 
-/// Take collection of pre-2015 events and convert to vector of RepoIdToName.
-/// Deduplicates by not inserting older events if a newer one is present for that
-/// repository ID.
-fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
-    let mut repo_mappings: Vec<RepoIdToName> = events
-        .par_iter()
-        .map(|r| {
-            // replace with r.repo_id():
-            let repo_id = match r.repo {
-                Some(ref repo) => repo.id,
-                None => match r.repository {
-                    Some(ref repository) => repository.id,
-                    None => -1,
-                }
-            };
-            let repo_name = match r.repo {
-                Some(ref repo) => repo.name.clone(),
-                None => match r.repository {
-                    Some(ref repository) => repository.name.clone(),
-                    None => "".to_string(),
-                }
-            };
-
-            let timestamp = match DateTime::parse_from_rfc3339(&r.created_at) {
-                Ok(time) => time,
-                Err(_) => DateTime::parse_from_rfc3339("2011-01-01T21:00:09+09:00").unwrap(), // Make ourselves low priority
-            };
-
-            let utc_timestamp = DateTime::<Utc>::from_utc(timestamp.naive_utc(), Utc);
-
-            RepoIdToName {
-                    repo_id: repo_id,
-                    repo_name: repo_name,
-                    event_timestamp: utc_timestamp,
-                }
-            }
-        )
-        .filter(|x| x.repo_id >= 0)
-        .filter(|x| x.repo_name != "")
-        .collect();
-
-    // get unique list of repo ids
-    repo_mappings.sort_by_key(|x| x.repo_id);
-    let mut list_of_repo_ids: Vec<i64> = repo_mappings.iter().map(|x| x.repo_id).collect();
-    list_of_repo_ids.sort();
-    list_of_repo_ids.dedup();
-    // for each repo id, find the entry with the most recent timestamp
-    let a: Vec<RepoIdToName> = list_of_repo_ids
-        .iter()
-        .map(|repo_id| {
-            // find most up to date entry for this one
-            let mut all_entries_for_repo_id: Vec<RepoIdToName> = repo_mappings
-                .iter()
-                .filter(|x| x.repo_id == *repo_id)
-                .map(|x| x.clone())
-                .collect();
-            all_entries_for_repo_id.sort_by_key(|x| x.event_timestamp);
-            // println!("sorted: {:#?}", all_entries_for_repo_id);
-            all_entries_for_repo_id.last().unwrap().clone()
-        })
-        .collect();
-
-    // collect and return those most recent timestamp ones
-    // println!("repo mappings after dedupin': {:#?}", a);
-    println!("pre-2015 len difference: {:?} to {:?}", repo_mappings.len(), a.len());
-    a
-}
-
-/// Take collection of 2015 and later events and convert to vector of RepoIdToName.
-/// Deduplicates by not inserting older events if a newer one is present for that
-/// repository ID.
-fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
-    let mut repo_mappings: Vec<RepoIdToName> = events
-        .par_iter()
-        .map(|r| RepoIdToName {
-                repo_id: r.repo.id,
-                repo_name: r.repo.name.clone(),
-                event_timestamp: r.created_at.clone(),
-            })
-        .collect();
-
-    // get unique list of repo ids
-    repo_mappings.sort_by_key(|x| x.repo_id);
-    let mut list_of_repo_ids: Vec<i64> = repo_mappings.par_iter().map(|x| x.repo_id).collect();
-    list_of_repo_ids.sort();
-    list_of_repo_ids.dedup();
-    // for each repo id, find the entry with the most recent timestamp
-    let a: Vec<RepoIdToName> = list_of_repo_ids
-        .par_iter()
-        .map(|repo_id| {
-            // find most up to date entry for this one
-            let mut all_entries_for_repo_id: Vec<RepoIdToName> = repo_mappings
-                .iter()
-                .filter(|x| x.repo_id == *repo_id)
-                .map(|x| x.clone())
-                .collect();
-            all_entries_for_repo_id.sort_by_key(|x| x.event_timestamp);
-            // println!("sorted: {:#?}", all_entries_for_repo_id);
-            all_entries_for_repo_id.last().unwrap().clone()
-        })
-        .collect();
-
-    println!("len difference: {:?} to {:?}", repo_mappings.len(), a.len());
-    a
-}
-
 /// Struct representing a completed item of work to upload to S3.
 /// Also used as a "no more items" signal.
 #[derive(Debug, Clone)]
@@ -618,41 +512,6 @@ mod tests {
             collector.push(event);
         }
         println!("len is {:?}", collector.len());
-    }
-
-    // Remove older entries from a RepoIdToName collection
-    #[test]
-    fn reduce_works() {
-        use repo_id_to_name_mappings;
-        use rusty_von_humboldt::RepoIdToName;
-        use rusty_von_humboldt::types::Event;
-        use chrono::{TimeZone, Utc};
-
-        let most_newest_timestamp = Utc.ymd(2014, 7, 8).and_hms(9, 10, 11);
-        let an_older_timestamp = Utc.ymd(2014, 7, 8).and_hms(0, 10, 11);
-
-        let mut expected: Vec<RepoIdToName> = Vec::new();
-        expected.push(RepoIdToName {
-            repo_id: 5,
-            repo_name: "new".to_string(),
-            event_timestamp: most_newest_timestamp,
-        });
-
-        let mut input = Vec::new();
-        
-        let mut foo = Event::new();
-        foo.repo.id = 5;
-        foo.repo.name = "old".to_string();
-        foo.created_at = an_older_timestamp;
-        input.push(foo);
-
-        foo = Event::new();
-        foo.repo.id = 5;
-        foo.repo.name = "new".to_string();
-        foo.created_at = most_newest_timestamp;
-        input.push(foo);
-
-        assert_eq!(expected, repo_id_to_name_mappings(&input));
     }
 
     // mostly a test for playing with the different timestamps in pre-2015 events
