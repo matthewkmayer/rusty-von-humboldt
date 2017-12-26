@@ -54,6 +54,13 @@ fn main() {
 }
 
 /// Using channels to synchronize between sending threads and receiving thread.
+///
+/// Spin up a receiving thread that takes Events from the channel. It consolidates/dedupes them, converts
+/// them to SQL then uploads to S3 when it has enough items collected. Behavior of committer count or
+/// repository ID mapping is controlled by the MODE lazy static.
+///
+/// Sending threads (two threads) take the to-process file list and downloads, deserializes and sends
+/// to the channel.
 fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
