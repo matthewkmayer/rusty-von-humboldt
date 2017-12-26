@@ -206,6 +206,14 @@ impl Event {
         }
     }
 
+    pub fn as_repo_id_mapping(&self) -> RepoIdToName {
+        RepoIdToName {
+            repo_id: self.repo.id,
+            repo_name: self.repo.name.clone(),
+            event_timestamp: self.created_at.clone(),
+        }
+    }
+
     pub fn as_commit_event(&self) -> CommitEvent {
         CommitEvent {
             actor: match self.actor.login {

@@ -146,12 +146,10 @@ pub fn download_and_parse_file
     let result = match client.get_object(&get_req) {
         Ok(s3_result) => s3_result,
         Err(_) => {
-            // println!("Failed to get {:?} from S3: {:?}.  Retrying.", file_on_s3, err);
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
-                Err(err) => {
-                    println!("Failed to get {:?} from S3, second attempt: {:?}", file_on_s3, err);
+                Err(_) => {
                     thread::sleep(time::Duration::from_millis(1000));
                     match client.get_object(&get_req) {
                         Ok(s3_result) => s3_result,

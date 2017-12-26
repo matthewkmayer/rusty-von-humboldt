@@ -17,7 +17,6 @@ use std::io::prelude::*;
 use std::env;
 use std::sync::mpsc::sync_channel;
 use std::{thread, time};
-use std::thread::JoinHandle;
 use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
@@ -29,175 +28,317 @@ use rand::{thread_rng, Rng};
 use rusoto_core::{DefaultCredentialsProviderSync, Region, default_tls_client, ProvideAwsCredentials, DispatchSignedRequest};
 use rusoto_s3::{S3, S3Client, PutObjectRequest};
 
-
-fn pipeline_main() {
+fn main() {
+    println!("Welcome to Rusty von Humboldt.");
     environment_check();
-
-    let pipes = make_channels_and_threads();
-    let file_list = make_list();
-
-    // distribute file list equally into the pipeline channels
-    send_ze_files(&pipes, &file_list);
-
-    wait_for_threads(pipes);
+    sinker();
+    println!("This is Rusty von Humboldt, heading home.");
 }
 
-fn wait_for_threads(pipes: Vec<PipelineTracker>) {
-    println!("Waiting for threads to finish by sending end of work signal.");
-    for pipe in &pipes {
-        let done_signal = FileWorkItem {
-            file: String::new(),
-            no_more_work: true,
-        };
-        let mut done = false;
-        while !done {
-            match pipe.transmit_channel.try_send(done_signal.clone()) {
-                Ok(_) => done = true,
-                Err(e) => {
-                    println!("Couldn't send to channel: {}", e);
-                    thread::sleep(time::Duration::from_millis(5000));
-                },
-            }
-        }
-    }
-    println!("\nSent end of work signal to all threads, waiting.\n");
-    for pipe in pipes {
-        match pipe.thread.join() {
-            Ok(_) => println!("Pipe thread all wrapped up."),
-            Err(e) => println!("Pipe thread didn't want to quit: {:?}", e),
-        }
-    }
-}
+fn sinker() {
+    let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
+    // take the receive channel for file locations
+    let mut file_list = make_list();
+    let (send, recv) = sync_channel(500000);
 
-fn send_ze_files(pipes: &[PipelineTracker], file_list: &[String]) {
-    for (i, file) in file_list.iter().enumerate() {
-        let mut file_sent = false;
-        let item_to_send = FileWorkItem {
-            file: file.clone(),
-            no_more_work: false,
-        };
-        // Keep trying to find the first open slot
-        while !file_sent {
-            for pipe in pipes {
-                if file_sent {
-                    break;
-                }  
-                match pipe.transmit_channel.try_send(item_to_send.clone()) {
-                    Ok(_) => file_sent = true,
-                    Err(_) => (),
-                }
-            }
-            // Is this needed?
-            thread::sleep(time::Duration::from_millis(2));
-        }
-        // print how many ingest files we've sent off so far
-        if i % 100 == 0 {
-            println!("Distributed {} files to process.", i);
-        }
-    }
-    println!("Files all sent.");
-}
-
-fn make_channels_and_threads() -> Vec<PipelineTracker> {
-    let mut pipes: Vec<PipelineTracker> = Vec::new();
-    let num_threads = 3;
-    for _x in 0..num_threads {
-        let (send, recv) = sync_channel(2);
-        let thread = thread::spawn(move|| {
-            let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+    let thread = thread::spawn(move|| { 
+        let thread_client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
                 Region::UsEast1);
-            let mut wrap_things_up = false;
-            let mut work_items: Vec<String> = Vec::new();
-            println!("Thread {:?}, starting.", thread::current().id());
-            loop {
-                if wrap_things_up {
-                    println!("wrapping thread up.");
-                    break;
-                }
-                work_items.clear();
-                // this loop does the accumulation of items to download, parse, convert, compress, upload:
-                loop {
-                    let item: FileWorkItem = match recv.recv() {
-                        Ok(i) => i,
-                        Err(e) => {
-                            println!("Oh noe receiving error: {:?}", e);
-                            panic!("receiving error");
-                        },
-                    };
-                    if item.no_more_work {
-                        println!("No more work, hooray!");
-                        wrap_things_up = true;
-                        break;
-                    } else {
-                        work_items.push(item.file);
-                    }
-                    if work_items.len() >= 100 {
-                        println!("Got enough items, time to work.");
-                        break;
-                    }
-                }
-                if work_items.len() == 0 {
-                    println!("Nothing to work on, breaking out");
-                    break;
-                }
-                println!("{:?} calling SFoD with {} items.", thread::current().id(), work_items.len());
-                single_function_of_doom(&client, &work_items);
+        
+        match MODE.committer_count {
+            true => do_work_son(recv, thread_client, dest_bucket),
+            false => do_repo_work_son(recv, thread_client, dest_bucket),
+        }
+    });
+
+    // send things all threaded like
+    let send_a = send.clone();
+    let send_b = send.clone();
+    let middle_of_file_list: usize = file_list.len()/2;
+    let second_file_list = file_list.split_off(middle_of_file_list);
+
+    let send_thread_a = thread::spawn(move|| { 
+        let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                Region::UsEast1);
+        for file in file_list.chunks(10) {
+            let event_subset = match MODE.committer_count {
+                true => get_event_subset_committers(&file, &client),
+                false => get_event_subset(&file, &client),
+            };
+            for event in event_subset {
+                let event_item = EventWorkItem {
+                    event: event,
+                    no_more_work: false,
+                };
+                send_a.send(event_item).expect("Should have sent event.");
             }
-            println!("Thread {:?}, out!", thread::current().id());
-        });
-        let pipe = PipelineTracker {
-            thread: thread,
-            transmit_channel: send,
-        };
-        pipes.push(pipe);
+        }
+    });
+
+    let send_thread_b = thread::spawn(move|| {
+        let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                Region::UsEast1);
+        for file in second_file_list.chunks(10) {
+            let event_subset = match MODE.committer_count {
+                true => get_event_subset_committers(&file, &client),
+                false => get_event_subset(&file, &client),
+            };
+            for event in event_subset {
+                let event_item = EventWorkItem {
+                    event: event,
+                    no_more_work: false,
+                };
+                send_b.send(event_item).expect("Couldn't send event to channel b");
+            }
+        }
+    });
+
+    match send_thread_a.join() {
+        Ok(_) => println!("Thread all wrapped up."),
+        Err(e) => println!("Thread didn't want to quit: {:?}", e),
     }
-    pipes
+    match send_thread_b.join() {
+        Ok(_) => println!("Thread all wrapped up."),
+        Err(e) => println!("Thread didn't want to quit: {:?}", e),
+    }
+
+    println!("We're done sending items.");
+    let event_item = EventWorkItem {
+        event: Event::new(),
+        no_more_work: true,
+    };
+    send.send(event_item).expect("Couldn't send stop work item.");
+    
+    match thread.join() {
+        Ok(_) => println!("Thread all wrapped up."),
+        Err(e) => println!("Thread didn't want to quit: {:?}", e),
+    }
+    println!("all wrapped up.");
 }
 
-fn compress_and_send
+// dudupe RepoIdToName: if repo_id and repo_name are the same we can ditch one
+fn do_repo_work_son
     <P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>
-    (work_item: WorkItem, client: &S3Client<P, D>) {
+    (recv: std::sync::mpsc::Receiver<EventWorkItem>, client: S3Client<P, D>, dest_bucket: String) {
 
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(work_item.sql.as_bytes()).expect("encoding failed");
-    let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
-
-    let upload_request = PutObjectRequest {
-        bucket: work_item.s3_bucket_name.to_owned(),
-        key: work_item.s3_file_location.to_owned(),
-        body: Some(compressed_results),
-        ..Default::default()
-    };
-
-    if MODE.dry_run {
-        println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
-        return;
-    }
-
-    match client.put_object(&upload_request) {
-        Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
-        Err(_) => {
-            thread::sleep(time::Duration::from_millis(100));
-            match client.put_object(&upload_request) {
-                Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
+    let events_to_hold = 15000000;
+    let mut wrap_things_up = false;
+    let mut repo_mappings: Vec<RepoIdToName> = Vec::with_capacity(events_to_hold);
+    let mut sql_collector: Vec<String> = Vec::new();
+    let mut sql_bytes: Vec<u8> = Vec::new();
+    let mut index = 0;
+    // TODO: handle pre-2015 events
+    loop {
+        index += 1;
+        repo_mappings.clear();
+        sql_collector.clear();
+        sql_bytes.clear();
+        if wrap_things_up {
+            println!("wrapping thread up.");
+            break;
+        }
+        // fetch work loop: 
+        loop {
+            let item: EventWorkItem = match recv.recv() {
+                Ok(i) => i,
                 Err(_) => {
-                    thread::sleep(time::Duration::from_millis(1000));
-                    match client.put_object(&upload_request) {
-                        Ok(_) => println!("uploaded {} to {}", work_item.s3_file_location, work_item.s3_bucket_name),
-                        Err(_) => {
-                            let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
-                                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-                                Region::UsEast1);
-                            match client.put_object(&upload_request) {
-                                Ok(_) => println!("uploaded {} to {} with new client", work_item.s3_file_location, work_item.s3_bucket_name),
-                                Err(e) => println!("FOURTH ATTEMPT TO UPLOAD FAILED SO SAD. {:?}", e),
-                            }
-                        },
-                    };
+                    panic!("receiving error");
                 },
             };
+            if repo_mappings.len() % 2000000 == 0 {
+                println!("Repo mapping size: {}", repo_mappings.len());
+                // println!("number of work items: {}", repo_mappings.len());
+                let old_size = repo_mappings.len();
+                repo_mappings.sort();
+                // println!("before: {:#?}", repo_mappings);
+                repo_mappings.dedup_by(|a, b| a.repo_id == b.repo_id && a.repo_name == b.repo_name);
+                // println!("after: {:#?}", repo_mappings);
+                // println!("{:?}: Inner loop: we shrunk the repo events from {} to {}", thread::current().id(), old_size, repo_mappings.len());
+            }
+            if item.no_more_work {
+                wrap_things_up = true;
+                break;
+            } else {
+                repo_mappings.push(item.event.as_repo_id_mapping());
+            }
+            if repo_mappings.len() == events_to_hold {
+                println!("\n\n\nWe got enough work to do!\n\n");
+                break;
+            }
+        }
+
+        let old_size = repo_mappings.len();
+        repo_mappings.sort();
+        repo_mappings.dedup();
+        println!("{:?}: We shrunk the repo events from {} to {}", thread::current().id(), old_size, repo_mappings.len());
+        println!("Converting to sql");
+        let mut inner_index = 1;
+
+        repo_mappings
+            .chunks(1000000)
+            .for_each(|chunk| {
+                chunk
+                    .par_iter()
+                    .map(|item| format!("{}\n", item.as_sql()))
+                    .collect_into(&mut sql_collector);
+
+                sql_bytes = sql_collector
+                    .join("")
+                    .as_bytes()
+                    .to_vec();
+
+                let file_name = format!("rvh/{}/{}/{:03}_{:03}.txt.gz", generate_mode_string(), *YEAR, index, inner_index);
+                inner_index += 1;
+                println!("compressing and uploading to s3");
+
+                let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                encoder.write_all(&sql_bytes).expect("encoding failed");
+                let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
+                println!("Compression done.");
+
+
+                let upload_request = PutObjectRequest {
+                    bucket: dest_bucket.clone(),
+                    key: file_name.to_owned(),
+                    body: Some(compressed_results),
+                    ..Default::default()
+                };
+
+                if MODE.dry_run {
+                    println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
+                } else {
+                    println!("Uploading to S3.");
+                    let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                                                DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                                                Region::UsEast1);
+                    match client.put_object(&upload_request) {
+                        Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
+                        Err(_) => println!("Whoops, couldn't upload {}", upload_request.key),
+                    }
+                }
+            }) 
+    }
+}
+
+fn do_work_son
+    <P: ProvideAwsCredentials + Sync + Send,
+    D: DispatchSignedRequest + Sync + Send>
+    (recv: std::sync::mpsc::Receiver<EventWorkItem>, client: S3Client<P, D>, dest_bucket: String) {
+
+    // bump this higher
+    let events_to_hold = 6000000;
+    let mut wrap_things_up = false;
+    let mut committer_events: Vec<CommitEvent> = Vec::new();
+    let mut sql_collector: Vec<String> = Vec::new();
+    let mut sql_bytes: Vec<u8> = Vec::new();
+    let mut index = 0;
+
+    loop {
+        index += 1;
+        committer_events.clear();
+        sql_collector.clear();
+        sql_bytes.clear();
+        if wrap_things_up {
+            println!("wrapping thread up.");
+            break;
+        }
+
+        loop {
+            let item: EventWorkItem = match recv.recv() {
+                Ok(i) => i,
+                Err(_) => {
+                    panic!("receiving error");
+                },
+            };
+            // convert to something like 1/10 of the max amount
+            if committer_events.len() % 200000 == 0 {
+                println!("number of work items: {}", committer_events.len());
+                let old_size = committer_events.len();
+                committer_events.sort();
+                committer_events.dedup();
+                println!("{:?}: Inner loop: we shrunk the committer events from {} to {}", thread::current().id(), old_size, committer_events.len());
+            }
+            if item.no_more_work {
+                wrap_things_up = true;
+                break;
+            } else {
+                committer_events.push(item.event.as_commit_event()); 
+            }
+            if committer_events.len() == events_to_hold {
+                println!("\n\n\nWe got enough work to do!\n\n");
+                break;
+            }
+        }
+
+        let old_size = committer_events.len();
+        committer_events.sort();
+        committer_events.dedup();
+        println!("{:?}: We shrunk the committer events from {} to {}", thread::current().id(), old_size, committer_events.len());
+
+        println!("Converting to sql");
+        committer_events
+            .par_iter()
+            .map(|item| format!("{}\n", item.as_sql()))
+            .collect_into(&mut sql_collector);
+        
+        sql_bytes = sql_collector
+            .join("")
+            .as_bytes()
+            .to_vec();
+
+        let file_name = format!("rvh/{}/{}/{:03}.txt.gz", generate_mode_string(), *YEAR, index);
+        
+        println!("compressing and uploading to s3");
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&sql_bytes).expect("encoding failed");
+        let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
+        println!("Compression done.");
+
+
+        let upload_request = PutObjectRequest {
+            bucket: dest_bucket.clone(),
+            key: file_name.to_owned(),
+            body: Some(compressed_results),
+            ..Default::default()
+        };
+
+        // switch to chunks, create new S3 client erry time:
+        {
+            if MODE.dry_run {
+                println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
+                continue;
+            }
+            println!("Uploading to S3.");
+            match client.put_object(&upload_request) {
+                Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
+                Err(_) => {
+                    thread::sleep(time::Duration::from_millis(100));
+                    match client.put_object(&upload_request) {
+                        Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
+                        Err(_) => {
+                            thread::sleep(time::Duration::from_millis(1000));
+                            match client.put_object(&upload_request) {
+                                Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
+                                Err(_) => {
+                                    let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
+                                        DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                                        Region::UsEast1);
+                                    match client.put_object(&upload_request) {
+                                        Ok(_) => println!("uploaded {} to {} with new client", upload_request.key, upload_request.bucket),
+                                        Err(e) => println!("FOURTH ATTEMPT TO UPLOAD FAILED SO SAD. {:?}", e),
+                                    }
+                                },
+                            };
+                        },
+                    };
+                }
+            }
+
         }
     }
 }
@@ -209,110 +350,6 @@ fn generate_mode_string() -> String {
     "repomapping".to_string()
 }
 
-// should be on the receiving end of a channel instead of being a function call, I think.
-fn single_function_of_doom 
-    <P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send>
-    (client: &S3Client<P, D>, chunk: &[String]) {
-    let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
-    if MODE.committer_count {
-        // TODO: extract to function
-        if *YEAR < 2015 {
-            let mut committer_events: Vec<CommitEvent> = get_old_event_subset_committers(chunk, &client)
-                .par_iter()
-                .map(|item| item.as_commit_event())
-                .collect();
-
-            let old_size = committer_events.len();
-            committer_events.sort();
-            committer_events.dedup();
-            println!("{:?}: We shrunk the pre-2015 committer events from {} to {}", thread::current().id(), old_size, committer_events.len());
-
-            let sql = committer_events
-                .par_iter()
-                .map(|item| format!("{}\n", item.as_sql()))
-                .collect::<Vec<String>>()
-                .join("");
-
-            let file_name = format!("rvh/{}/{}/{:x}.txt.gz", generate_mode_string(), *YEAR, md5::compute(&sql));
-
-            let workitem = WorkItem {
-                sql: sql,
-                s3_bucket_name: dest_bucket.clone(),
-                s3_file_location: file_name,
-                no_more_work: false,
-            };
-
-            compress_and_send(workitem, client);
-        } else {
-            let event_subset = get_event_subset_committers(chunk, &client);
-            // println!("2015+ eventsubset is {:#?}", event_subset.first().unwrap());
-            let mut committer_events: Vec<CommitEvent> = event_subset
-                .par_iter()
-                .map(|item| item.as_commit_event())
-                .collect();
-            
-            let old_size = committer_events.len();
-            committer_events.sort();
-            committer_events.dedup();
-            println!("{:?}: We shrunk the 2015+ committer events from {} to {}", thread::current().id(), old_size, committer_events.len());
-
-            let sql = committer_events
-                .par_iter()
-                .map(|item| format!("{}\n", item.as_sql()))
-                .collect::<Vec<String>>()
-                .join("");
-
-            let file_name = format!("rvh/{}/{}/{:x}.txt.gz", generate_mode_string(), *YEAR, md5::compute(&sql));
-
-            let workitem = WorkItem {
-                sql: sql,
-                s3_bucket_name: dest_bucket.clone(),
-                s3_file_location: file_name,
-                no_more_work: false,
-            };
-            compress_and_send(workitem, client);
-        }
-    } else if MODE.repo_mapping {
-        // TODO: extract to function
-        if *YEAR < 2015 {
-            // change get_old_event_subset to only fetch x number of files?
-            let event_subset = get_old_event_subset(chunk, &client);
-            let sql = repo_id_to_name_mappings_old(&event_subset)
-                .par_iter()
-                .map(|item| format!("{}\n", item.as_sql()))
-                .collect::<Vec<String>>()
-                .join("");
-            
-            let file_name = format!("rvh/{}/{:x}", generate_mode_string(), md5::compute(&sql));
-
-            let workitem = WorkItem {
-                sql: sql,
-                s3_bucket_name: dest_bucket.clone(),
-                s3_file_location: file_name,
-                no_more_work: false,
-            };
-            compress_and_send(workitem, client);
-        } else {
-            // deduping this would be ~~~~amazing
-            let event_subset = get_event_subset(chunk, &client);
-            let sql = repo_id_to_name_mappings(&event_subset)
-                .par_iter()
-                .map(|item| format!("{}\n", item.as_sql()))
-                .collect::<Vec<String>>()
-                .join("");
-            let file_name = format!("rvh/{}/{:x}", generate_mode_string(), md5::compute(&sql));
-            let workitem = WorkItem {
-                sql: sql,
-                s3_bucket_name: dest_bucket.clone(),
-                s3_file_location: file_name,
-                no_more_work: false,
-            };
-            compress_and_send(workitem, client);
-        }
-    }
-}
-
 // check things like dryrun etc
 fn environment_check() {
     let _ = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
@@ -321,12 +358,6 @@ fn environment_check() {
     let _ = env::var("GHAHOURS")
         .expect("Need GHAHOURS set to number of hours (files) to process")
         .parse::<i64>().expect("Please set GHAHOURS to an integer value");
-}
-
-fn main() {
-    println!("Welcome to Rusty von Humboldt.");
-    pipeline_main();
-    println!("This is Rusty von Humboldt, heading home.");
 }
 
 fn make_list() -> Vec<String> {
@@ -444,7 +475,6 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
     a
 }
 
-// We should add some testing on this
 fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
     let mut repo_mappings: Vec<RepoIdToName> = events
         .par_iter()
@@ -499,22 +529,22 @@ struct Mode {
     dry_run: bool,
 }
 
-#[derive(Debug)]
-struct PipelineTracker {
-    thread: JoinHandle<()>,
-    transmit_channel: std::sync::mpsc::SyncSender<FileWorkItem>,
-}
-
 #[derive(Debug, Clone)]
 struct FileWorkItem {
     file: String,
     no_more_work: bool,
 }
 
+#[derive(Debug, Clone)]
+struct EventWorkItem {
+    event: Event,
+    no_more_work: bool,
+}
+
 lazy_static! {
     static ref MODE: Mode = Mode { 
-        committer_count: true,
-        repo_mapping: false,
+        committer_count: false,
+        repo_mapping: true,
         dry_run: {
             match env::var("DRYRUN"){
                 Ok(dryrun) => match bool::from_str(&dryrun) {
@@ -535,6 +565,25 @@ lazy_static! {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn max_event_vec_size() {
+        use rusty_von_humboldt::types::Event;
+        use chrono::{TimeZone, Utc};
+
+        let mut collector: Vec<Event> = Vec::new();
+        // 9 million items is ~1.6 GB of RAM
+        // 55 million items was ~8 GB
+        for i in 0..95000 {
+            let mut event = Event::new();
+            event.repo.id = i;
+            event.repo.name = "hi".to_string();
+            event.created_at = Utc.ymd(2014, 7, 8).and_hms(9, 10, 11);
+
+            collector.push(event);
+        }
+        println!("len is {:?}", collector.len());
+    }
 
     #[test]
     fn reduce_works() {
