@@ -15,6 +15,7 @@ use types::*;
 
 const MAX_PAGE_SIZE: i64 = 500;
 
+/// Get list of files in the bucket, starting with the specified year and up to the number of hours specified.
 pub fn construct_list_of_ingest_files() -> Vec<String> {
     // Get file list from S3:
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
@@ -89,6 +90,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
     files
 }
 
+/// Download the specified file and parse into pre-2015 events.
 pub fn download_and_parse_old_file
     <P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Pre2015Event>, String> {
@@ -111,6 +113,8 @@ pub fn download_and_parse_old_file
                     match client.get_object(&get_req) {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
+                            // if we get another error it's likely related to the connection pool
+                            // being in a weird state: make a new client which makes a new pool.
                             println!("Failed to get {:?} from S3, Third attempt: {:?}", file_on_s3, err);
                             let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
                                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
@@ -132,6 +136,7 @@ pub fn download_and_parse_old_file
     parse_ze_file_2014_older(BufReader::new(decoder))
 }
 
+/// Download the specified file and parse into 2015 and later events.
 pub fn download_and_parse_file
     <P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>(file_on_s3: &str, client: &S3Client<P, D>) -> Result<Vec<Event>, String> {
@@ -146,6 +151,7 @@ pub fn download_and_parse_file
     let result = match client.get_object(&get_req) {
         Ok(s3_result) => s3_result,
         Err(_) => {
+            // Retry on error
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(&get_req) {
                 Ok(s3_result) => s3_result,
@@ -154,6 +160,8 @@ pub fn download_and_parse_file
                     match client.get_object(&get_req) {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
+                            // if we get another error it's likely related to the connection pool
+                            // being in a weird state: make a new client which makes a new pool.
                             println!("Failed to get {:?} from S3, Third attempt: {:?}", file_on_s3, err);
                             let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
                                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
@@ -174,6 +182,7 @@ pub fn download_and_parse_file
     parse_ze_file_2015_newer(BufReader::new(decoder))
 }
 
+/// Deserialize pre-2015 events
 fn parse_ze_file_2014_older<R: BufRead>(mut contents: R) -> Result<Vec<Pre2015Event>, String> {
     let mut events: Vec<Pre2015Event> = Vec::new();
     let mut line = String::new();
@@ -188,6 +197,7 @@ fn parse_ze_file_2014_older<R: BufRead>(mut contents: R) -> Result<Vec<Pre2015Ev
     Ok(events)
 }
 
+/// Deserialize 2015 and later events
 fn parse_ze_file_2015_newer<R: BufRead>(mut contents: R) -> Result<Vec<Event>, String> {
     let mut events: Vec<Event> = Vec::new();
     let mut line = String::new();

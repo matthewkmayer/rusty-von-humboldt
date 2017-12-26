@@ -28,6 +28,24 @@ use rand::{thread_rng, Rng};
 use rusoto_core::{DefaultCredentialsProviderSync, Region, default_tls_client, ProvideAwsCredentials, DispatchSignedRequest};
 use rusoto_s3::{S3, S3Client, PutObjectRequest};
 
+/// MODE contains what mode to do: committer count or repo mappings as well as if it should
+/// upload results to s3 or not (dry run).
+lazy_static! {
+    static ref MODE: Mode = Mode {
+        committer_count: false,
+        repo_mapping: true,
+        dry_run: {
+            match env::var("DRYRUN"){
+                Ok(dryrun) => match bool::from_str(&dryrun) {
+                    Ok(should_dryrun) => should_dryrun,
+                    Err(_) => false,
+                },
+                Err(_) => false,
+            }
+        },
+    };
+}
+
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
     environment_check();
@@ -35,12 +53,21 @@ fn main() {
     println!("This is Rusty von Humboldt, heading home.");
 }
 
+/// Using channels to synchronize between sending threads and receiving thread.
+///
+/// Spin up a receiving thread that takes Events from the channel. It consolidates/dedupes them, converts
+/// them to SQL then uploads to S3 when it has enough items collected. Behavior of committer count or
+/// repository ID mapping is controlled by the MODE lazy static.
+///
+/// Sending threads (two threads) take the to-process file list and downloads, deserializes and sends
+/// to the channel.
 fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
     let mut file_list = make_list();
     let (send, recv) = sync_channel(500000);
 
+    // The receiving thread that accepts Events and converts them to the type needed.
     let thread = thread::spawn(move|| { 
         let thread_client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
@@ -96,6 +123,7 @@ fn sinker() {
         }
     });
 
+    // These join calls will block until the sending threads have completed all their work.
     match send_thread_a.join() {
         Ok(_) => println!("Thread all wrapped up."),
         Err(e) => println!("Thread didn't want to quit: {:?}", e),
@@ -111,7 +139,8 @@ fn sinker() {
         no_more_work: true,
     };
     send.send(event_item).expect("Couldn't send stop work item.");
-    
+
+    // Wait for the worker thread to wrap up.
     match thread.join() {
         Ok(_) => println!("Thread all wrapped up."),
         Err(e) => println!("Thread didn't want to quit: {:?}", e),
@@ -212,6 +241,9 @@ fn do_repo_work_son
                     println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
                 } else {
                     println!("Uploading to S3.");
+                    // We create a new client every time since the underlying connection pool can
+                    // deadlock if all the connections were closed by the receiving end (S3).
+                    // This bypasses that issue by creating a new pool every time.
                     let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
                                                 DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
                                                 Region::UsEast1);
@@ -224,6 +256,7 @@ fn do_repo_work_son
     }
 }
 
+/// Committer count
 fn do_work_son
     <P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>
@@ -307,13 +340,15 @@ fn do_work_son
             ..Default::default()
         };
 
-        // switch to chunks, create new S3 client erry time:
         {
             if MODE.dry_run {
                 println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
                 continue;
             }
             println!("Uploading to S3.");
+            // We create a new client every time since the underlying connection pool can
+            // deadlock if all the connections were closed by the receiving end (S3).
+            // This bypasses that issue by creating a new pool every time.
             match client.put_object(&upload_request) {
                 Ok(_) => println!("uploaded {} to {}", upload_request.key, upload_request.bucket),
                 Err(_) => {
@@ -360,23 +395,27 @@ fn environment_check() {
         .parse::<i64>().expect("Please set GHAHOURS to an integer value");
 }
 
+/// Make the list of GHA input files.
 fn make_list() -> Vec<String> {
     let mut file_list = construct_list_of_ingest_files();
     let mut rng = thread_rng();
+    // Shuffling the list prevents hotspot reads from S3, boosting download performance.
     rng.shuffle(&mut file_list);
     println!("file list is now {:#?}", file_list);
     file_list
 }
 
+/// Get all events from the file specified on S3
 fn get_event_subset<P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>(chunk: &[String], client: &S3Client<P, D>) -> Vec<Event> {
     chunk
         .par_iter()
-        // todo: don't panic here
+        // todo: don't panic here (issue only when S3 kicks back errors)
         .flat_map(|file_name| download_and_parse_file(file_name, &client).expect("Issue with file ingest"))
         .collect()
 }
 
+/// Get commit/PR events from the file specified on S3
 fn get_event_subset_committers<P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>(chunk: &[String], client: &S3Client<P, D>) -> Vec<Event> {
     
@@ -389,6 +428,7 @@ fn get_event_subset_committers<P: ProvideAwsCredentials + Sync + Send,
     commit_events
 }
 
+/// Get commit/PR events for pre-2015 events from the file specified on S3
 fn get_old_event_subset_committers<P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>(chunk: &[String], client: &S3Client<P, D>) -> Vec<Pre2015Event> {
     
@@ -401,6 +441,7 @@ fn get_old_event_subset_committers<P: ProvideAwsCredentials + Sync + Send,
     commit_events
 }
 
+// Get all pre-2015 events from file specified
 fn get_old_event_subset<P: ProvideAwsCredentials + Sync + Send,
     D: DispatchSignedRequest + Sync + Send>(chunk: &[String], client: &S3Client<P, D>) -> Vec<Pre2015Event> {
     chunk
@@ -410,6 +451,9 @@ fn get_old_event_subset<P: ProvideAwsCredentials + Sync + Send,
         .collect()
 }
 
+/// Take collection of pre-2015 events and convert to vector of RepoIdToName.
+/// Deduplicates by not inserting older events if a newer one is present for that
+/// repository ID.
 fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
     let mut repo_mappings: Vec<RepoIdToName> = events
         .par_iter()
@@ -447,7 +491,7 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
         .filter(|x| x.repo_id >= 0)
         .filter(|x| x.repo_name != "")
         .collect();
-    // We should try to dedupe here: convert to actual timestamps instead of doing Strings for timestamps
+
     // get unique list of repo ids
     repo_mappings.sort_by_key(|x| x.repo_id);
     let mut list_of_repo_ids: Vec<i64> = repo_mappings.iter().map(|x| x.repo_id).collect();
@@ -475,6 +519,9 @@ fn repo_id_to_name_mappings_old(events: &[Pre2015Event]) -> Vec<RepoIdToName> {
     a
 }
 
+/// Take collection of 2015 and later events and convert to vector of RepoIdToName.
+/// Deduplicates by not inserting older events if a newer one is present for that
+/// repository ID.
 fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
     let mut repo_mappings: Vec<RepoIdToName> = events
         .par_iter()
@@ -484,8 +531,6 @@ fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
                 event_timestamp: r.created_at.clone(),
             })
         .collect();
-
-    // println!("repo mappings at first: {:#?}", repo_mappings);
 
     // get unique list of repo ids
     repo_mappings.sort_by_key(|x| x.repo_id);
@@ -508,12 +553,12 @@ fn repo_id_to_name_mappings(events: &[Event]) -> Vec<RepoIdToName> {
         })
         .collect();
 
-    // collect and return those most recent timestamp ones
-    // println!("repo mappings after dedupin': {:#?}", a);
     println!("len difference: {:?} to {:?}", repo_mappings.len(), a.len());
     a
 }
 
+/// Struct representing a completed item of work to upload to S3.
+/// Also used as a "no more items" signal.
 #[derive(Debug, Clone)]
 struct WorkItem {
     sql: String,
@@ -522,6 +567,7 @@ struct WorkItem {
     no_more_work: bool,
 }
 
+/// Struct for what mode we're in.
 #[derive(Debug, Clone)]
 struct Mode {
     committer_count: bool,
@@ -529,32 +575,20 @@ struct Mode {
     dry_run: bool,
 }
 
+/// Struct representing a file to download and parse.
+/// Also allows a "no more work" signal to be passed.
 #[derive(Debug, Clone)]
 struct FileWorkItem {
     file: String,
     no_more_work: bool,
 }
 
+/// Struct representing a 2015 and later event.
+/// Also allows a "no more work" signal to be passed.
 #[derive(Debug, Clone)]
 struct EventWorkItem {
     event: Event,
     no_more_work: bool,
-}
-
-lazy_static! {
-    static ref MODE: Mode = Mode { 
-        committer_count: false,
-        repo_mapping: true,
-        dry_run: {
-            match env::var("DRYRUN"){
-                Ok(dryrun) => match bool::from_str(&dryrun) {
-                    Ok(should_dryrun) => should_dryrun,
-                    Err(_) => false,
-                },
-                Err(_) => false,  
-            }
-        },
-    };
 }
 
 lazy_static! {
@@ -566,6 +600,7 @@ lazy_static! {
 #[cfg(test)]
 mod tests {
 
+    // Only really used to see what the memory usage of a big ol' vector is.
     #[test]
     fn max_event_vec_size() {
         use rusty_von_humboldt::types::Event;
@@ -585,6 +620,7 @@ mod tests {
         println!("len is {:?}", collector.len());
     }
 
+    // Remove older entries from a RepoIdToName collection
     #[test]
     fn reduce_works() {
         use repo_id_to_name_mappings;
