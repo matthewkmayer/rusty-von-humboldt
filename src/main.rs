@@ -220,7 +220,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
             sql_bytes = group_repo_id_sql_insert(chunk).as_bytes().to_vec();
 
             let file_name = format!(
-                "rvh/{}/{}/{:03}_{:03}.txt.gz",
+                "rvh2/{}/{}/{:03}_{:03}.txt.gz",
                 generate_mode_string(),
                 *YEAR,
                 index,
