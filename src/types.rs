@@ -11,16 +11,14 @@ use chrono::{DateTime, TimeZone, Utc};
 /// If the ID isn't included we use a placeholder value.
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
-    #[serde(default = "id_not_specified")]
-    pub id: i64,
+    #[serde(default = "id_not_specified")] pub id: i64,
     pub login: Option<String>,
 }
 
 /// GitHub repository.  Assuming the ID stays constant but the name can change.
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Repo {
-    #[serde(default = "id_not_specified")]
-    pub id: i64,
+    #[serde(default = "id_not_specified")] pub id: i64,
     pub name: String,
 }
 
@@ -40,24 +38,20 @@ pub struct Commit {
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Payload {
     pub action: Option<String>,
-    #[serde(rename = "pull_request")]
-    pub pull_request: Option<PullRequest>,
+    #[serde(rename = "pull_request")] pub pull_request: Option<PullRequest>,
     pub commits: Option<Vec<Commit>>,
 }
 
 /// 2015 and later github archive event.
 #[derive(Deserialize, Debug, Clone)]
 pub struct Event {
-    #[serde(deserialize_with = "from_str")]
-    pub id: i64,
+    #[serde(deserialize_with = "from_str")] pub id: i64,
     pub created_at: DateTime<Utc>,
-    #[serde(rename = "type")]
-    pub event_type: String,
+    #[serde(rename = "type")] pub event_type: String,
     pub actor: Actor,
     pub repo: Repo,
     pub payload: Option<Payload>,
 }
-
 
 impl Event {
     /// Constructor for a placeholder event.
@@ -97,7 +91,7 @@ impl Event {
     }
 
     // Also covers placeholder Events made in the constructor above
-    pub fn is_missing_data(&self) -> bool{
+    pub fn is_missing_data(&self) -> bool {
         if self.id == -1 || self.repo.id == -1 || self.actor.id == -1 {
             return true;
         }
@@ -162,10 +156,10 @@ pub struct Pre2015Actor {
 
 /// Custom deserializer to handle getting the actor login for pre-2015 events.
 /// What we're looking for can be in two different places.
-impl<'de> Deserialize<'de> for Pre2015Actor
-{
+impl<'de> Deserialize<'de> for Pre2015Actor {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where D: Deserializer<'de>
+    where
+        D: Deserializer<'de>,
     {
         #[derive(Deserialize, Debug)]
         struct ActorHelper {
@@ -177,11 +171,11 @@ impl<'de> Deserialize<'de> for Pre2015Actor
             // sometimes it's just missing, we'll deal with it by ignoring it.
             let helper = ActorHelper::deserialize(&v).map_err(de::Error::custom)?;
             // println!("all good, helper is {:?}", helper);
-            Ok(Pre2015Actor{
+            Ok(Pre2015Actor {
                 actor: helper.login,
             })
         } else {
-            Ok(Pre2015Actor{
+            Ok(Pre2015Actor {
                 actor: v.to_string().replace("\"", ""), // don't pass along the value of `"foo"`, make it `foo`
             })
         }
@@ -193,8 +187,7 @@ impl<'de> Deserialize<'de> for Pre2015Actor
 pub struct Pre2015Event {
     pub repository: Option<Repo>,
     pub repo: Option<Repo>,
-    #[serde(rename = "type")]
-    pub event_type: String,
+    #[serde(rename = "type")] pub event_type: String,
     pub actor: Pre2015Actor,
     pub created_at: String,
     pub payload: Option<OldPayload>,
@@ -219,9 +212,11 @@ impl Pre2015Event {
     pub fn repo_id(&self) -> i64 {
         let repo_id = match self.repo {
             Some(ref repo) => repo.id,
-            None => match self.repository {
-                Some(ref repository) => repository.id,
-                None => -1, // TODO: somehow ignore this event, as we can't use it
+            None => {
+                match self.repository {
+                    Some(ref repository) => repository.id,
+                    None => -1, // TODO: somehow ignore this event, as we can't use it
+                }
             }
         };
         repo_id
@@ -235,13 +230,17 @@ impl Pre2015Event {
             return false;
         }
         match self.payload {
-            Some(ref payload) => match payload.pull_request {
-                Some(ref pr) => match pr.merged {
-                    Some(merged) => merged,
-                    None => false, // sometimes merged isn't there, instead of ignoring should we assume it was accepted?
-                },
-                None => false,
-            },
+            Some(ref payload) => {
+                match payload.pull_request {
+                    Some(ref pr) => {
+                        match pr.merged {
+                            Some(merged) => merged,
+                            None => false, // sometimes merged isn't there, instead of ignoring should we assume it was accepted?
+                        }
+                    }
+                    None => false,
+                }
+            }
             None => false,
         }
     }
@@ -260,7 +259,6 @@ impl Pre2015Event {
     }
 }
 
-
 // -----------------------------------------------
 // events trimmed down to the fields we care about
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
@@ -275,16 +273,17 @@ impl CommitEvent {
         if self.repo_id == -1 || self.actor == "" {
             return "".to_string();
         }
-        let sql = format!("INSERT INTO committer_repo_id_names (repo_id, actor_name)
+        let sql = format!(
+            "INSERT INTO committer_repo_id_names (repo_id, actor_name)
             VALUES ({repo_id}, '{actor_name}')
             ON CONFLICT DO NOTHING;",
             repo_id = self.repo_id,
-            actor_name = self.actor);
+            actor_name = self.actor
+        );
 
         sql
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct PrByActor {
@@ -324,9 +323,10 @@ fn id_not_specified() -> i64 {
 
 /// Allows us to convert "1234" to 1234 integer type
 fn from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-    where T: FromStr,
-          T::Err: Display,
-          D: Deserializer<'de>
+where
+    T: FromStr,
+    T::Err: Display,
+    D: Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
     T::from_str(&s).map_err(de::Error::custom)
