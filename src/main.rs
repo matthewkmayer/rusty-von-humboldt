@@ -21,7 +21,7 @@ use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use chrono::{DateTime, Utc};
+//use chrono::{DateTime, Utc};
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
@@ -79,7 +79,7 @@ fn sinker() {
 
         match MODE.committer_count {
             true => do_work_son(recv, thread_client, dest_bucket),
-            false => do_repo_work_son(recv, thread_client, dest_bucket),
+            false => do_repo_work_son(recv, dest_bucket),
         }
     });
 
@@ -162,14 +162,7 @@ fn sinker() {
 }
 
 // dudupe RepoIdToName: if repo_id and repo_name are the same we can ditch one
-fn do_repo_work_son<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
->(
-    recv: std::sync::mpsc::Receiver<EventWorkItem>,
-    client: S3Client<P, D>,
-    dest_bucket: String,
-) {
+fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: String) {
     let events_to_hold = 15000000;
     let mut wrap_things_up = false;
     let mut repo_mappings: Vec<RepoIdToName> = Vec::with_capacity(events_to_hold);
@@ -196,13 +189,8 @@ fn do_repo_work_son<
             };
             if repo_mappings.len() % 2000000 == 0 {
                 println!("Repo mapping size: {}", repo_mappings.len());
-                // println!("number of work items: {}", repo_mappings.len());
-                let old_size = repo_mappings.len();
                 repo_mappings.sort();
-                // println!("before: {:#?}", repo_mappings);
                 repo_mappings.dedup_by(|a, b| a.repo_id == b.repo_id && a.repo_name == b.repo_name);
-                // println!("after: {:#?}", repo_mappings);
-                // println!("{:?}: Inner loop: we shrunk the repo events from {} to {}", thread::current().id(), old_size, repo_mappings.len());
             }
             if item.no_more_work {
                 wrap_things_up = true;
@@ -218,7 +206,7 @@ fn do_repo_work_son<
 
         let old_size = repo_mappings.len();
         repo_mappings.sort();
-        repo_mappings.dedup(); // TODO: this should be dudupe by key as above
+        repo_mappings.dedup_by(|a, b| a.repo_id == b.repo_id && a.repo_name == b.repo_name);
         println!(
             "{:?}: We shrunk the repo events from {} to {}",
             thread::current().id(),
@@ -229,12 +217,7 @@ fn do_repo_work_son<
         let mut inner_index = 1;
 
         repo_mappings.chunks(1000000).for_each(|chunk| {
-            chunk
-                .par_iter()
-                .map(|item| format!("{}\n", item.as_sql()))
-                .collect_into(&mut sql_collector);
-
-            sql_bytes = sql_collector.join("").as_bytes().to_vec();
+            sql_bytes = group_repo_id_sql_insert(chunk).as_bytes().to_vec();
 
             let file_name = format!(
                 "rvh/{}/{}/{:03}_{:03}.txt.gz",
@@ -585,7 +568,7 @@ ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = (excluded.rep
 WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;", row_to_insert)
         })
         .collect::<Vec<String>>()
-        .join("")
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -619,38 +602,7 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
             event_timestamp: Utc.ymd(2014, 7, 8).and_hms(9, 10, 11),
         });
 
-        assert_eq!(expected, group_repo_id_sql_insert(&source_events));
-    }
-
-    // If the collection we received has duplicates it should go in different statements
-    #[test]
-    fn multi_row_insert_sql_if_duplicates() {
-        use rusty_von_humboldt::types::RepoIdToName;
-        use chrono::{TimeZone, Utc};
-        use group_repo_id_sql_insert;
-
-        let expected = "";
-        let mut source_events: Vec<RepoIdToName> = Vec::new();
-        source_events.push(RepoIdToName {
-            repo_name: "foo/repo-name".to_string(),
-            repo_id: 1,
-            event_timestamp: Utc.ymd(2014, 7, 8).and_hms(9, 10, 11),
-        });
-        source_events.push(RepoIdToName {
-            repo_name: "baz/a-repo".to_string(),
-            repo_id: 2,
-            event_timestamp: Utc.ymd(2014, 7, 8).and_hms(9, 10, 11),
-        });
-        source_events.push(RepoIdToName {
-            repo_name: "baz/a-repo".to_string(),
-            repo_id: 2,
-            event_timestamp: Utc.ymd(2014, 7, 8).and_hms(9, 10, 11),
-        });
-        source_events.push(RepoIdToName {
-            repo_name: "bar/a-repo-forked".to_string(),
-            repo_id: 55,
-            event_timestamp: Utc.ymd(2014, 7, 8).and_hms(9, 10, 11),
-        });
+        println!("Check this: {}", group_repo_id_sql_insert(&source_events));
 
         assert_eq!(expected, group_repo_id_sql_insert(&source_events));
     }
