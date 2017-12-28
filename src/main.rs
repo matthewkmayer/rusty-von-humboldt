@@ -568,14 +568,16 @@ fn group_repo_id_sql_insert(repo_id_mappings: &[RepoIdToName]) -> String {
     repo_id_mappings
         .chunks(5)
         .map(|chunk| {
-            // chunk is five items
-            let mut row_to_insert: String = String::new();
-            for item in chunk {
-                row_to_insert.push_str(&format!(
-                    "({}, {}, {})",
-                    item.repo_id, item.repo_name, item.event_timestamp
-                ));
-            }
+            let row_to_insert: String = chunk
+                .iter()
+                .map(|item| {
+                    format!(
+                        "({}, '{}', '{}')",
+                        item.repo_id, item.repo_name, item.event_timestamp
+                    )
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
 
             format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
 VALUES {}
@@ -597,7 +599,7 @@ mod tests {
         use group_repo_id_sql_insert;
 
         let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
-VALUES (1, 'foo/repo-name', '2014-07-08 09:10:11'), (2, 'baz/a-repo', '2014-07-08 09:10:11'), (55, 'bar/a-repo-forked', '2014-07-08 09:10:11')
+VALUES (1, 'foo/repo-name', '2014-07-08 09:10:11 UTC'), (2, 'baz/a-repo', '2014-07-08 09:10:11 UTC'), (55, 'bar/a-repo-forked', '2014-07-08 09:10:11 UTC')
 ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = (excluded.repo_name, excluded.event_timestamp)
 WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;";
         let mut source_events: Vec<RepoIdToName> = Vec::new();
