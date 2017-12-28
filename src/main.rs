@@ -565,7 +565,25 @@ lazy_static! {
 }
 
 fn group_repo_id_sql_insert(repo_id_mappings: &[RepoIdToName]) -> String {
-    "not implemented".to_string()
+    repo_id_mappings
+        .chunks(5)
+        .map(|chunk| {
+            // chunk is five items
+            let mut row_to_insert: String = String::new();
+            for item in chunk {
+                row_to_insert.push_str(&format!(
+                    "({}, {}, {})",
+                    item.repo_id, item.repo_name, item.event_timestamp
+                ));
+            }
+
+            format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+VALUES {}
+ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = (excluded.repo_name, excluded.event_timestamp)
+WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;", row_to_insert)
+        })
+        .collect::<Vec<String>>()
+        .join("")
 }
 
 #[cfg(test)]
@@ -575,7 +593,7 @@ mod tests {
     #[test]
     fn multi_row_insert_sql() {
         use rusty_von_humboldt::types::RepoIdToName;
-        use chrono::{Utc, TimeZone};
+        use chrono::{TimeZone, Utc};
         use group_repo_id_sql_insert;
 
         let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
@@ -606,7 +624,7 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
     #[test]
     fn multi_row_insert_sql_if_duplicates() {
         use rusty_von_humboldt::types::RepoIdToName;
-        use chrono::{Utc, TimeZone};
+        use chrono::{TimeZone, Utc};
         use group_repo_id_sql_insert;
 
         let expected = "";
