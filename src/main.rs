@@ -547,25 +547,60 @@ lazy_static! {
     };
 }
 
+// if a repo ID shows up twice the collection we received has a duplicate in it
+fn dupes_in(repo_id_mappings: &[RepoIdToName]) -> bool {
+    let mut repo_ids = repo_id_mappings
+        .iter()
+        .map(|item| item.repo_id)
+        .collect::<Vec<i64>>();
+    let old_count = repo_ids.len();
+    repo_ids.sort();
+    repo_ids.dedup();
+    if old_count != repo_ids.len() {
+        return true;
+    }
+    false
+}
+
+// It's possible repo_id is in here twice, which causes an error from Postgres.
 fn group_repo_id_sql_insert(repo_id_mappings: &[RepoIdToName]) -> String {
+    // if we're given a set of repo mappings where the same repo id is specified in there, don't group things:
+    // EG: repo_id of 5 and name of foo, repo_id of 5 and name of bar: they can't go in one statement.
     repo_id_mappings
         .chunks(5)
         .map(|chunk| {
-            let row_to_insert: String = chunk
-                .iter()
-                .map(|item| {
-                    format!(
-                        "({}, '{}', '{}')",
-                        item.repo_id, item.repo_name, item.event_timestamp
-                    )
-                })
-                .collect::<Vec<String>>()
-                .join(", ");
+            // if this chunk has duplicate IDs in it we need to format things differently
+            if dupes_in(chunk) {
+                chunk
+                    .iter()
+                    .map(|item| {
+                        format!(
+                            "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+VALUES ({}, '{}', '{}')
+ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = (excluded.repo_name, excluded.event_timestamp)
+WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;",
+                            item.repo_id, item.repo_name, item.event_timestamp
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            } else {
+                let row_to_insert: String = chunk
+                    .iter()
+                    .map(|item| {
+                        format!(
+                            "({}, '{}', '{}')",
+                            item.repo_id, item.repo_name, item.event_timestamp
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .join(", ");
 
-            format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+                format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
 VALUES {}
 ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = (excluded.repo_name, excluded.event_timestamp)
 WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;", row_to_insert)
+            }
         })
         .collect::<Vec<String>>()
         .join("\n")
@@ -607,24 +642,44 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
         assert_eq!(expected, group_repo_id_sql_insert(&source_events));
     }
 
-    // Only really used to see what the memory usage of a big ol' vector is.
     #[test]
-    fn max_event_vec_size() {
-        use rusty_von_humboldt::types::Event;
+    fn multi_row_with_dupes_insert_sql() {
+        use rusty_von_humboldt::types::RepoIdToName;
         use chrono::{TimeZone, Utc};
+        use group_repo_id_sql_insert;
 
-        let mut collector: Vec<Event> = Vec::new();
-        // 9 million items is ~1.6 GB of RAM
-        // 55 million items was ~8 GB
-        for i in 0..95000 {
-            let mut event = Event::new();
-            event.repo.id = i;
-            event.repo.name = "hi".to_string();
-            event.created_at = Utc.ymd(2014, 7, 8).and_hms(9, 10, 11);
+        let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+VALUES (1, 'foo/repo-name', '2014-07-08 09:10:11 UTC')
+ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = (excluded.repo_name, excluded.event_timestamp)
+WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;
+INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+VALUES (2, 'baz/a-repo', '2014-07-08 09:10:11 UTC')
+ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = (excluded.repo_name, excluded.event_timestamp)
+WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;
+INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+VALUES (2, 'bar/a-repo-renamed', '2015-07-08 09:10:11 UTC')
+ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = (excluded.repo_name, excluded.event_timestamp)
+WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;";
+        let mut source_events: Vec<RepoIdToName> = Vec::new();
+        source_events.push(RepoIdToName {
+            repo_name: "foo/repo-name".to_string(),
+            repo_id: 1,
+            event_timestamp: Utc.ymd(2014, 7, 8).and_hms(9, 10, 11),
+        });
+        source_events.push(RepoIdToName {
+            repo_name: "baz/a-repo".to_string(),
+            repo_id: 2,
+            event_timestamp: Utc.ymd(2014, 7, 8).and_hms(9, 10, 11),
+        });
+        source_events.push(RepoIdToName {
+            repo_name: "bar/a-repo-renamed".to_string(),
+            repo_id: 2,
+            event_timestamp: Utc.ymd(2015, 7, 8).and_hms(9, 10, 11),
+        });
 
-            collector.push(event);
-        }
-        println!("len is {:?}", collector.len());
+        println!("Check this: {}", group_repo_id_sql_insert(&source_events));
+
+        assert_eq!(expected, group_repo_id_sql_insert(&source_events));
     }
 
     // mostly a test for playing with the different timestamps in pre-2015 events
