@@ -1,3 +1,5 @@
+extern crate sha1;
+
 use std::fmt::Display;
 use std::str::FromStr;
 use serde::de::{self, Deserialize, Deserializer};
@@ -268,17 +270,26 @@ pub struct CommitEvent {
 }
 
 impl CommitEvent {
-    pub fn as_sql(&self) -> String {
+    pub fn as_sql(&self, obfuscate: bool) -> String {
         // Sometimes bad data can still get to here, skip if we don't have all the data required.
         if self.repo_id == -1 || self.actor == "" {
             return "".to_string();
         }
+        let actor_name = match obfuscate {
+            true => {
+                let mut sha_er = sha1::Sha1::new();
+                sha_er.update(self.actor.as_bytes());
+                sha_er.digest().to_string()
+            },
+            false => self.actor.clone(),
+        };
+
         let sql = format!(
             "INSERT INTO committer_repo_id_names (repo_id, actor_name)
             VALUES ({repo_id}, '{actor_name}')
             ON CONFLICT DO NOTHING;",
             repo_id = self.repo_id,
-            actor_name = self.actor
+            actor_name = actor_name,
         );
 
         sql

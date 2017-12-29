@@ -4,7 +4,6 @@ extern crate chrono;
 extern crate flate2;
 #[macro_use]
 extern crate lazy_static;
-extern crate md5;
 extern crate rand;
 extern crate rayon;
 extern crate rusoto_core;
@@ -21,7 +20,6 @@ use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-//use chrono::{DateTime, Utc};
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
@@ -29,12 +27,14 @@ use rusoto_core::{default_tls_client, DefaultCredentialsProviderSync, DispatchSi
                   ProvideAwsCredentials, Region};
 use rusoto_s3::{PutObjectRequest, S3, S3Client};
 
+const OBFUSCATE_COMMITTER_IDS: bool = true;
+
 /// MODE contains what mode to do: committer count or repo mappings as well as if it should
 /// upload results to s3 or not (dry run).
 lazy_static! {
     static ref MODE: Mode = Mode {
-        committer_count: false,
-        repo_mapping: true,
+        committer_count: true,
+        repo_mapping: false,
         dry_run: {
             match env::var("DRYRUN"){
                 Ok(dryrun) => match bool::from_str(&dryrun) {
@@ -335,8 +335,10 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
         println!("Converting to sql");
         committer_events
             .par_iter()
-            .map(|item| format!("{}\n", item.as_sql()))
+            .map(|item| format!("{}\n", item.as_sql(OBFUSCATE_COMMITTER_IDS)))
             .collect_into(&mut sql_collector);
+
+        println!("sql_collector is {}", sql_collector.join(""));
 
         sql_bytes = sql_collector.join("").as_bytes().to_vec();
 
@@ -473,38 +475,6 @@ fn get_event_subset_committers<
         .filter(|ref x| x.is_commit_event())
         .collect();
     commit_events
-}
-
-/// Get commit/PR events for pre-2015 events from the file specified on S3
-fn get_old_event_subset_committers<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
->(
-    chunk: &[String],
-    client: &S3Client<P, D>,
-) -> Vec<Pre2015Event> {
-    let commit_events: Vec<Pre2015Event> = chunk
-        .par_iter()
-        // todo: don't panic here
-        .flat_map(|file_name| download_and_parse_old_file(file_name, &client).expect("Issue with file ingest"))
-        .filter(|ref x| x.is_commit_event())
-        .collect();
-    commit_events
-}
-
-// Get all pre-2015 events from file specified
-fn get_old_event_subset<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
->(
-    chunk: &[String],
-    client: &S3Client<P, D>,
-) -> Vec<Pre2015Event> {
-    chunk
-        .par_iter()
-        // todo: don't panic here
-        .flat_map(|file_name| download_and_parse_old_file(file_name, &client).expect("Issue with file ingest"))
-        .collect()
 }
 
 /// Struct representing a completed item of work to upload to S3.
