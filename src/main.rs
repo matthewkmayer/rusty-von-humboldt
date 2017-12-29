@@ -298,7 +298,7 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
                 }
             };
             // convert to something like 1/10 of the max amount
-            if committer_events.len() % 200000 == 0 {
+            if committer_events.len() % 2000000 == 0 {
                 println!("number of work items: {}", committer_events.len());
                 let old_size = committer_events.len();
                 committer_events.sort();
@@ -337,8 +337,6 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
             .par_iter()
             .map(|item| format!("{}\n", item.as_sql(OBFUSCATE_COMMITTER_IDS)))
             .collect_into(&mut sql_collector);
-
-        println!("sql_collector is {}", sql_collector.join(""));
 
         sql_bytes = sql_collector.join("").as_bytes().to_vec();
 
@@ -532,6 +530,10 @@ fn dupes_in(repo_id_mappings: &[RepoIdToName]) -> bool {
     false
 }
 
+fn group_committer_sql_insert(committers: &[CommitEvent]) -> String {
+    "yay".to_string()
+}
+
 // It's possible repo_id is in here twice, which causes an error from Postgres.
 fn group_repo_id_sql_insert(repo_id_mappings: &[RepoIdToName]) -> String {
     // if we're given a set of repo mappings where the same repo id is specified in there, don't group things:
@@ -578,6 +580,59 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn multi_row_insert_committers() {
+        use rusty_von_humboldt::types::CommitEvent;
+        use group_committer_sql_insert;
+
+        let mut items: Vec<CommitEvent> = Vec::new();
+
+        items.push(CommitEvent {
+            actor: "foo".to_string(),
+            repo_id: 1
+        });
+        items.push(CommitEvent {
+            actor: "bar".to_string(),
+            repo_id: 1
+        });
+        // this dupe should go away after sorting:
+        items.push(CommitEvent {
+            actor: "bar".to_string(),
+            repo_id: 1
+        });
+        items.push(CommitEvent {
+            actor: "foo".to_string(),
+            repo_id: 2
+        });
+        items.push(CommitEvent {
+            actor: "bar".to_string(),
+            repo_id: 2
+        });
+        items.push(CommitEvent {
+            actor: "baz".to_string(),
+            repo_id: 2
+        });
+
+
+        // ensure sorting removes dupes
+        let old_len = items.len();
+        items.sort();
+        items.dedup();
+        assert_eq!(old_len - 1, items.len());
+
+        // group sql statement works
+        let expected_sql = "";
+
+        assert_eq!(expected_sql, group_committer_sql_insert(&items));
+
+        // group sql statement works when it needs to "overflow" into another INSERT statement
+        // (add another item into the vector)
+        items.push(CommitEvent {
+            actor: "rando".to_string(),
+            repo_id: 2
+        });
+    }
 
     // Put multiple rows into a single INSERT statement, with ON CONFLICT clause
     #[test]
