@@ -1,3 +1,5 @@
+#![feature(test)]
+
 extern crate rusty_von_humboldt;
 
 extern crate chrono;
@@ -335,6 +337,7 @@ fn do_work_son(
             index
         );
 
+        // It'd be nice to fire this off to a thread:
         println!("compressing and uploading to s3");
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -527,7 +530,36 @@ fn dupes_in(repo_id_mappings: &[RepoIdToName]) -> bool {
 // Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
 fn group_committer_sql_insert(committers: &[CommitEvent], obfuscate: bool) -> String {
     committers
-        .chunks(5)
+        .chunks(10)
+        // par iter here?
+        .map(|chunk| {
+            let row_to_insert: String = chunk
+                .iter()
+                .map(|chunk| {
+                    let actor_name = match obfuscate {
+                        true => {
+                            let mut sha_er = sha1::Sha1::new();
+                            sha_er.update(chunk.actor.as_bytes());
+                            sha_er.digest().to_string()
+                        },
+                        false => chunk.actor.clone(),
+                    };
+                    format!("({}, '{}')", chunk.repo_id, actor_name)
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
+
+            format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", row_to_insert)
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+
+// Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
+fn group_committer_sql_insert_par(committers: &[CommitEvent], obfuscate: bool) -> String {
+    committers
+        .par_chunks(10)
         .map(|chunk| {
             let row_to_insert: String = chunk
                 .iter()
@@ -557,6 +589,7 @@ fn group_repo_id_sql_insert(repo_id_mappings: &[RepoIdToName]) -> String {
     // EG: repo_id of 5 and name of foo, repo_id of 5 and name of bar: they can't go in one statement.
     repo_id_mappings
         .chunks(5)
+        // par iter here?
         .map(|chunk| {
             // if this chunk has duplicate IDs in it we need to format things differently
             if dupes_in(chunk) {
@@ -597,6 +630,41 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
 
 #[cfg(test)]
 mod tests {
+    extern crate test;
+    use self::test::Bencher;
+
+    #[bench]
+    fn sql_generation(b: &mut Bencher) {
+        use rusty_von_humboldt::types::CommitEvent;
+        use group_committer_sql_insert;
+
+        b.iter(|| {
+            let mut events: Vec<CommitEvent> = Vec::with_capacity(100000);
+            for n in 0..100000 {
+                events.push(CommitEvent {
+                    actor: "foo".to_string(),
+                    repo_id: n
+                })
+            }
+            group_committer_sql_insert(&events, false);
+        });
+    }
+    #[bench]
+    fn parallel_sql_generation(b: &mut Bencher) {
+        use rusty_von_humboldt::types::CommitEvent;
+        use group_committer_sql_insert_par;
+
+        b.iter(|| {
+            let mut events: Vec<CommitEvent> = Vec::with_capacity(100000);
+            for n in 0..100000 {
+                events.push(CommitEvent {
+                    actor: "foo".to_string(),
+                    repo_id: n
+                })
+            }
+            group_committer_sql_insert_par(&events, false);
+        });
+    }
 
     #[test]
     fn multi_row_insert_committers() {
