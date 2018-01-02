@@ -71,15 +71,8 @@ fn sinker() {
 
     // The receiving thread that accepts Events and converts them to the type needed.
     let thread = thread::spawn(move || {
-        let thread_client = S3Client::new(
-            default_tls_client().expect("Couldn't make TLS client"),
-            DefaultCredentialsProviderSync::new()
-                .expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-            Region::UsEast1,
-        );
-
         match MODE.committer_count {
-            true => do_work_son(recv, thread_client, dest_bucket),
+            true => do_work_son(recv, dest_bucket),
             false => do_repo_work_son(recv, dest_bucket),
         }
     });
@@ -268,9 +261,8 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
 }
 
 /// Committer count
-fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest + Sync + Send>(
+fn do_work_son(
     recv: std::sync::mpsc::Receiver<EventWorkItem>,
-    client: S3Client<P, D>,
     dest_bucket: String,
 ) {
     // bump this higher
@@ -364,6 +356,12 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
                          upload_request.key);
                 continue;
             }
+            let client = S3Client::new(
+                default_tls_client().expect("Couldn't make TLS client"),
+                DefaultCredentialsProviderSync::new()
+                    .expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                Region::UsEast1,
+            );
             println!("Uploading to S3.");
             // We create a new client every time since the underlying connection pool can
             // deadlock if all the connections were closed by the receiving end (S3).
