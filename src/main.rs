@@ -328,7 +328,7 @@ fn do_work_son(
         );
 
 
-        sql_bytes = group_committer_sql_insert(&committer_events, OBFUSCATE_COMMITTER_IDS).as_bytes().to_vec();
+        sql_bytes = group_committer_sql_insert_par(&committer_events, OBFUSCATE_COMMITTER_IDS).as_bytes().to_vec();
 
         let file_name = format!(
             "rvh2/{}/{}/{:02}.txt.gz",
@@ -559,7 +559,7 @@ fn group_committer_sql_insert(committers: &[CommitEvent], obfuscate: bool) -> St
 // Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
 fn group_committer_sql_insert_par(committers: &[CommitEvent], obfuscate: bool) -> String {
     committers
-        .par_chunks(10)
+        .par_chunks(20)
         .map(|chunk| {
             let row_to_insert: String = chunk
                 .iter()
@@ -639,8 +639,8 @@ mod tests {
         use group_committer_sql_insert;
 
         b.iter(|| {
-            let mut events: Vec<CommitEvent> = Vec::with_capacity(100000);
-            for n in 0..100000 {
+            let mut events: Vec<CommitEvent> = Vec::with_capacity(300000);
+            for n in 0..300000 {
                 events.push(CommitEvent {
                     actor: "foo".to_string(),
                     repo_id: n
@@ -655,8 +655,8 @@ mod tests {
         use group_committer_sql_insert_par;
 
         b.iter(|| {
-            let mut events: Vec<CommitEvent> = Vec::with_capacity(100000);
-            for n in 0..100000 {
+            let mut events: Vec<CommitEvent> = Vec::with_capacity(300000);
+            for n in 0..300000 {
                 events.push(CommitEvent {
                     actor: "foo".to_string(),
                     repo_id: n
