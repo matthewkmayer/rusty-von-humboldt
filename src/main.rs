@@ -530,8 +530,21 @@ fn dupes_in(repo_id_mappings: &[RepoIdToName]) -> bool {
     false
 }
 
+// Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
 fn group_committer_sql_insert(committers: &[CommitEvent]) -> String {
-    "yay".to_string()
+    committers
+        .chunks(5)
+        .map(|chunk| {
+            let row_to_insert: String = chunk
+                .iter()
+                .map(|chunk| {format!("({}, '{}')", chunk.repo_id, chunk.actor)})
+                .collect::<Vec<String>>()
+                .join(", ");
+
+            format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", row_to_insert)
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
 }
 
 // It's possible repo_id is in here twice, which causes an error from Postgres.
@@ -622,7 +635,7 @@ mod tests {
         assert_eq!(old_len - 1, items.len());
 
         // group sql statement works
-        let expected_sql = "";
+        let expected_sql = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, 'bar'), (2, 'bar'), (2, 'baz'), (1, 'foo'), (2, 'foo') ON CONFLICT DO NOTHING;";
 
         assert_eq!(expected_sql, group_committer_sql_insert(&items));
 
