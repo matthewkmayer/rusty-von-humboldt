@@ -11,6 +11,7 @@ extern crate rusoto_s3;
 extern crate serde;
 extern crate serde_json;
 extern crate stopwatch;
+extern crate sha1;
 
 use std::io::prelude::*;
 use std::env;
@@ -220,7 +221,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
             sql_bytes = group_repo_id_sql_insert(chunk).as_bytes().to_vec();
 
             let file_name = format!(
-                "rvh2/{}/{}/{:03}_{:03}.txt.gz",
+                "rvh2/{}/{}/{:02}_{:02}.txt.gz",
                 generate_mode_string(),
                 *YEAR,
                 index,
@@ -273,7 +274,7 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
     dest_bucket: String,
 ) {
     // bump this higher
-    let events_to_hold = 6000000;
+    let events_to_hold = 9000000;
     let mut wrap_things_up = false;
     let mut committer_events: Vec<CommitEvent> = Vec::new();
     let mut sql_collector: Vec<String> = Vec::new();
@@ -332,16 +333,11 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
             committer_events.len()
         );
 
-        println!("Converting to sql");
-        committer_events
-            .par_iter()
-            .map(|item| format!("{}\n", item.as_sql(OBFUSCATE_COMMITTER_IDS)))
-            .collect_into(&mut sql_collector);
 
-        sql_bytes = sql_collector.join("").as_bytes().to_vec();
+        sql_bytes = group_committer_sql_insert(&committer_events, OBFUSCATE_COMMITTER_IDS).as_bytes().to_vec();
 
         let file_name = format!(
-            "rvh/{}/{}/{:03}.txt.gz",
+            "rvh2/{}/{}/{:02}.txt.gz",
             generate_mode_string(),
             *YEAR,
             index
@@ -531,13 +527,23 @@ fn dupes_in(repo_id_mappings: &[RepoIdToName]) -> bool {
 }
 
 // Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
-fn group_committer_sql_insert(committers: &[CommitEvent]) -> String {
+fn group_committer_sql_insert(committers: &[CommitEvent], obfuscate: bool) -> String {
     committers
         .chunks(5)
         .map(|chunk| {
             let row_to_insert: String = chunk
                 .iter()
-                .map(|chunk| {format!("({}, '{}')", chunk.repo_id, chunk.actor)})
+                .map(|chunk| {
+                    let actor_name = match obfuscate {
+                        true => {
+                            let mut sha_er = sha1::Sha1::new();
+                            sha_er.update(chunk.actor.as_bytes());
+                            sha_er.digest().to_string()
+                        },
+                        false => chunk.actor.clone(),
+                    };
+                    format!("({}, '{}')", chunk.repo_id, actor_name)
+                })
                 .collect::<Vec<String>>()
                 .join(", ");
 
@@ -637,14 +643,11 @@ mod tests {
         // group sql statement works
         let expected_sql = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, 'bar'), (2, 'bar'), (2, 'baz'), (1, 'foo'), (2, 'foo') ON CONFLICT DO NOTHING;";
 
-        assert_eq!(expected_sql, group_committer_sql_insert(&items));
+        assert_eq!(expected_sql, group_committer_sql_insert(&items, false));
 
-        // group sql statement works when it needs to "overflow" into another INSERT statement
-        // (add another item into the vector)
-        items.push(CommitEvent {
-            actor: "rando".to_string(),
-            repo_id: 2
-        });
+        let expected_sql_obf = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, '62cdb7020ff920e5aa642c3d4066950dd1f01f4d'), (2, '62cdb7020ff920e5aa642c3d4066950dd1f01f4d'), (2, 'bbe960a25ea311d21d40669e93df2003ba9b90a2'), (1, '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33'), (2, '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33') ON CONFLICT DO NOTHING;";
+
+        assert_eq!(expected_sql_obf, group_committer_sql_insert(&items, true));
     }
 
     // Put multiple rows into a single INSERT statement, with ON CONFLICT clause
