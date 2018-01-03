@@ -11,6 +11,7 @@ extern crate rusoto_s3;
 extern crate serde;
 extern crate serde_json;
 extern crate stopwatch;
+extern crate sha1;
 
 use std::io::prelude::*;
 use std::env;
@@ -27,7 +28,7 @@ use rusoto_core::{default_tls_client, DefaultCredentialsProviderSync, DispatchSi
                   ProvideAwsCredentials, Region};
 use rusoto_s3::{PutObjectRequest, S3, S3Client};
 
-const OBFUSCATE_COMMITTER_IDS: bool = true;
+const OBFUSCATE_COMMITTER_IDS: bool = false;
 
 /// MODE contains what mode to do: committer count or repo mappings as well as if it should
 /// upload results to s3 or not (dry run).
@@ -66,19 +67,12 @@ fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
     let mut file_list = make_list();
-    let (send, recv) = sync_channel(500000);
+    let (send, recv) = sync_channel(5000000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
     let thread = thread::spawn(move || {
-        let thread_client = S3Client::new(
-            default_tls_client().expect("Couldn't make TLS client"),
-            DefaultCredentialsProviderSync::new()
-                .expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-            Region::UsEast1,
-        );
-
         match MODE.committer_count {
-            true => do_work_son(recv, thread_client, dest_bucket),
+            true => do_work_son(recv, dest_bucket),
             false => do_repo_work_son(recv, dest_bucket),
         }
     });
@@ -220,7 +214,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
             sql_bytes = group_repo_id_sql_insert(chunk).as_bytes().to_vec();
 
             let file_name = format!(
-                "rvh2/{}/{}/{:03}_{:03}.txt.gz",
+                "rvh2/{}/{}/{:02}_{:02}.txt.gz",
                 generate_mode_string(),
                 *YEAR,
                 index,
@@ -267,13 +261,12 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
 }
 
 /// Committer count
-fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest + Sync + Send>(
+fn do_work_son(
     recv: std::sync::mpsc::Receiver<EventWorkItem>,
-    client: S3Client<P, D>,
     dest_bucket: String,
 ) {
     // bump this higher
-    let events_to_hold = 6000000;
+    let events_to_hold = 15000000;
     let mut wrap_things_up = false;
     let mut committer_events: Vec<CommitEvent> = Vec::new();
     let mut sql_collector: Vec<String> = Vec::new();
@@ -283,6 +276,7 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
     loop {
         index += 1;
         committer_events.clear();
+        let mut should_dedupe = true;
         sql_collector.clear();
         sql_bytes.clear();
         if wrap_things_up {
@@ -297,8 +291,8 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
                     panic!("receiving error");
                 }
             };
-            // convert to something like 1/10 of the max amount
-            if committer_events.len() % 200000 == 0 {
+
+            if should_dedupe && committer_events.len() % 14000000 == 0 {
                 println!("number of work items: {}", committer_events.len());
                 let old_size = committer_events.len();
                 committer_events.sort();
@@ -309,6 +303,13 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
                     old_size,
                     committer_events.len()
                 );
+
+                // if we've shrunk things to within 1,000,000 or so items of the max item size,
+                // we can call it deduped enough.
+                // Otherwise we spin on this and it's asymptotically closer and closer to the max item size.
+                if events_to_hold - committer_events.len() < 100000 {
+                    should_dedupe = false;
+                }
             }
             if item.no_more_work {
                 wrap_things_up = true;
@@ -332,23 +333,17 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
             committer_events.len()
         );
 
-        println!("Converting to sql");
-        committer_events
-            .par_iter()
-            .map(|item| format!("{}\n", item.as_sql(OBFUSCATE_COMMITTER_IDS)))
-            .collect_into(&mut sql_collector);
 
-        println!("sql_collector is {}", sql_collector.join(""));
-
-        sql_bytes = sql_collector.join("").as_bytes().to_vec();
+        sql_bytes = group_committer_sql_insert_par(&committer_events, OBFUSCATE_COMMITTER_IDS).as_bytes().to_vec();
 
         let file_name = format!(
-            "rvh/{}/{}/{:03}.txt.gz",
+            "rvh2/{}/{}/{:02}.txt.gz",
             generate_mode_string(),
             *YEAR,
             index
         );
 
+        // It'd be nice to fire this off to a thread:
         println!("compressing and uploading to s3");
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -370,6 +365,12 @@ fn do_work_son<P: ProvideAwsCredentials + Sync + Send, D: DispatchSignedRequest 
                          upload_request.key);
                 continue;
             }
+            let client = S3Client::new(
+                default_tls_client().expect("Couldn't make TLS client"),
+                DefaultCredentialsProviderSync::new()
+                    .expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
+                Region::UsEast1,
+            );
             println!("Uploading to S3.");
             // We create a new client every time since the underlying connection pool can
             // deadlock if all the connections were closed by the receiving end (S3).
@@ -532,12 +533,69 @@ fn dupes_in(repo_id_mappings: &[RepoIdToName]) -> bool {
     false
 }
 
+// Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
+fn group_committer_sql_insert(committers: &[CommitEvent], obfuscate: bool) -> String {
+    committers
+        .chunks(10)
+        // par iter here?
+        .map(|chunk| {
+            let row_to_insert: String = chunk
+                .iter()
+                .map(|chunk| {
+                    let actor_name = match obfuscate {
+                        true => {
+                            let mut sha_er = sha1::Sha1::new();
+                            sha_er.update(chunk.actor.as_bytes());
+                            sha_er.digest().to_string()
+                        },
+                        false => chunk.actor.clone(),
+                    };
+                    format!("({}, '{}')", chunk.repo_id, actor_name)
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
+
+            format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", row_to_insert)
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+
+// Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
+fn group_committer_sql_insert_par(committers: &[CommitEvent], obfuscate: bool) -> String {
+    committers
+        .par_chunks(20)
+        .map(|chunk| {
+            let row_to_insert: String = chunk
+                .iter()
+                .map(|chunk| {
+                    let actor_name = match obfuscate {
+                        true => {
+                            let mut sha_er = sha1::Sha1::new();
+                            sha_er.update(chunk.actor.as_bytes());
+                            sha_er.digest().to_string()
+                        },
+                        false => chunk.actor.clone(),
+                    };
+                    format!("({}, '{}')", chunk.repo_id, actor_name)
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
+
+            format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", row_to_insert)
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
 // It's possible repo_id is in here twice, which causes an error from Postgres.
 fn group_repo_id_sql_insert(repo_id_mappings: &[RepoIdToName]) -> String {
     // if we're given a set of repo mappings where the same repo id is specified in there, don't group things:
     // EG: repo_id of 5 and name of foo, repo_id of 5 and name of bar: they can't go in one statement.
     repo_id_mappings
         .chunks(5)
+        // par iter here?
         .map(|chunk| {
             // if this chunk has duplicate IDs in it we need to format things differently
             if dupes_in(chunk) {
@@ -578,6 +636,91 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
 
 #[cfg(test)]
 mod tests {
+    extern crate test;
+    use self::test::Bencher;
+
+    #[bench]
+    fn sql_generation(b: &mut Bencher) {
+        use rusty_von_humboldt::types::CommitEvent;
+        use group_committer_sql_insert;
+
+        b.iter(|| {
+            let mut events: Vec<CommitEvent> = Vec::with_capacity(300000);
+            for n in 0..300000 {
+                events.push(CommitEvent {
+                    actor: "foo".to_string(),
+                    repo_id: n
+                })
+            }
+            group_committer_sql_insert(&events, false);
+        });
+    }
+    #[bench]
+    fn parallel_sql_generation(b: &mut Bencher) {
+        use rusty_von_humboldt::types::CommitEvent;
+        use group_committer_sql_insert_par;
+
+        b.iter(|| {
+            let mut events: Vec<CommitEvent> = Vec::with_capacity(300000);
+            for n in 0..300000 {
+                events.push(CommitEvent {
+                    actor: "foo".to_string(),
+                    repo_id: n
+                })
+            }
+            group_committer_sql_insert_par(&events, false);
+        });
+    }
+
+    #[test]
+    fn multi_row_insert_committers() {
+        use rusty_von_humboldt::types::CommitEvent;
+        use group_committer_sql_insert;
+
+        let mut items: Vec<CommitEvent> = Vec::new();
+
+        items.push(CommitEvent {
+            actor: "foo".to_string(),
+            repo_id: 1
+        });
+        items.push(CommitEvent {
+            actor: "bar".to_string(),
+            repo_id: 1
+        });
+        // this dupe should go away after sorting:
+        items.push(CommitEvent {
+            actor: "bar".to_string(),
+            repo_id: 1
+        });
+        items.push(CommitEvent {
+            actor: "foo".to_string(),
+            repo_id: 2
+        });
+        items.push(CommitEvent {
+            actor: "bar".to_string(),
+            repo_id: 2
+        });
+        items.push(CommitEvent {
+            actor: "baz".to_string(),
+            repo_id: 2
+        });
+
+
+        // ensure sorting removes dupes
+        let old_len = items.len();
+        items.sort();
+        items.dedup();
+        assert_eq!(old_len - 1, items.len());
+
+        // group sql statement works
+        let expected_sql = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, 'bar'), (2, 'bar'), (2, 'baz'), (1, 'foo'), (2, 'foo') ON CONFLICT DO NOTHING;";
+
+        assert_eq!(expected_sql, group_committer_sql_insert(&items, false));
+
+        let expected_sql_obf = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, '62cdb7020ff920e5aa642c3d4066950dd1f01f4d'), (2, '62cdb7020ff920e5aa642c3d4066950dd1f01f4d'), (2, 'bbe960a25ea311d21d40669e93df2003ba9b90a2'), (1, '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33'), (2, '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33') ON CONFLICT DO NOTHING;";
+
+        assert_eq!(expected_sql_obf, group_committer_sql_insert(&items, true));
+    }
 
     // Put multiple rows into a single INSERT statement, with ON CONFLICT clause
     #[test]
