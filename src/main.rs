@@ -1,5 +1,3 @@
-#![feature(test)]
-
 extern crate rusty_von_humboldt;
 
 extern crate chrono;
@@ -69,7 +67,7 @@ fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
     let mut file_list = make_list();
-    let (send, recv) = sync_channel(500000);
+    let (send, recv) = sync_channel(5000000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
     let thread = thread::spawn(move || {
@@ -268,7 +266,7 @@ fn do_work_son(
     dest_bucket: String,
 ) {
     // bump this higher
-    let events_to_hold = 9000000;
+    let events_to_hold = 15000000;
     let mut wrap_things_up = false;
     let mut committer_events: Vec<CommitEvent> = Vec::new();
     let mut sql_collector: Vec<String> = Vec::new();
@@ -278,6 +276,7 @@ fn do_work_son(
     loop {
         index += 1;
         committer_events.clear();
+        let mut should_dedupe = true;
         sql_collector.clear();
         sql_bytes.clear();
         if wrap_things_up {
@@ -292,8 +291,8 @@ fn do_work_son(
                     panic!("receiving error");
                 }
             };
-            // convert to something like 1/10 of the max amount
-            if committer_events.len() % 2000000 == 0 {
+
+            if should_dedupe && committer_events.len() % 14000000 == 0 {
                 println!("number of work items: {}", committer_events.len());
                 let old_size = committer_events.len();
                 committer_events.sort();
@@ -304,6 +303,13 @@ fn do_work_son(
                     old_size,
                     committer_events.len()
                 );
+
+                // if we've shrunk things to within 1,000,000 or so items of the max item size,
+                // we can call it deduped enough.
+                // Otherwise we spin on this and it's asymptotically closer and closer to the max item size.
+                if events_to_hold - committer_events.len() < 100000 {
+                    should_dedupe = false;
+                }
             }
             if item.no_more_work {
                 wrap_things_up = true;
