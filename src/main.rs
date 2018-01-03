@@ -67,7 +67,7 @@ fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
     let mut file_list = make_list();
-    let (send, recv) = sync_channel(5000000);
+    let (send, recv) = sync_channel(1000000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
     let thread = thread::spawn(move || {
@@ -266,7 +266,8 @@ fn do_work_son(
     dest_bucket: String,
 ) {
     // bump this higher
-    let events_to_hold = 15000000;
+    let events_to_hold = 18000000;
+    let dedup_threshold = 16000000;
     let mut wrap_things_up = false;
     let mut committer_events: Vec<CommitEvent> = Vec::new();
     let mut sql_collector: Vec<String> = Vec::new();
@@ -292,8 +293,7 @@ fn do_work_son(
                 }
             };
 
-            if should_dedupe && committer_events.len() % 14000000 == 0 {
-                println!("number of work items: {}", committer_events.len());
+            if should_dedupe && committer_events.len() % dedup_threshold == 0 {
                 let old_size = committer_events.len();
                 committer_events.sort();
                 committer_events.dedup();
@@ -307,7 +307,7 @@ fn do_work_son(
                 // if we've shrunk things to within 1,000,000 or so items of the max item size,
                 // we can call it deduped enough.
                 // Otherwise we spin on this and it's asymptotically closer and closer to the max item size.
-                if events_to_hold - committer_events.len() < 100000 {
+                if dedup_threshold - committer_events.len() < 700000 {
                     should_dedupe = false;
                 }
             }
