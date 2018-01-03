@@ -104,6 +104,7 @@ impl Event {
         self.is_accepted_pr() || self.is_direct_push_event()
     }
 
+    // This needs some testing
     pub fn is_accepted_pr(&self) -> bool {
         if self.event_type != "PullRequestEvent" {
             return false;
