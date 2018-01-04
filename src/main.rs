@@ -10,8 +10,8 @@ extern crate rusoto_core;
 extern crate rusoto_s3;
 extern crate serde;
 extern crate serde_json;
-extern crate stopwatch;
 extern crate sha1;
+extern crate stopwatch;
 
 use std::io::prelude::*;
 use std::env;
@@ -70,11 +70,9 @@ fn sinker() {
     let (send, recv) = sync_channel(1000000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
-    let thread = thread::spawn(move || {
-        match MODE.committer_count {
-            true => do_work_son(recv, dest_bucket),
-            false => do_repo_work_son(recv, dest_bucket),
-        }
+    let thread = thread::spawn(move || match MODE.committer_count {
+        true => do_work_son(recv, dest_bucket),
+        false => do_repo_work_son(recv, dest_bucket),
     });
 
     // send things all threaded like
@@ -261,10 +259,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
 }
 
 /// Committer count
-fn do_work_son(
-    recv: std::sync::mpsc::Receiver<EventWorkItem>,
-    dest_bucket: String,
-) {
+fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: String) {
     // bump this higher
     let events_to_hold = 18000000;
     let dedup_threshold = 16000000;
@@ -333,8 +328,9 @@ fn do_work_son(
             committer_events.len()
         );
 
-
-        sql_bytes = group_committer_sql_insert_par(&committer_events, OBFUSCATE_COMMITTER_IDS).as_bytes().to_vec();
+        sql_bytes = group_committer_sql_insert_par(&committer_events, OBFUSCATE_COMMITTER_IDS)
+            .as_bytes()
+            .to_vec();
 
         let file_name = format!(
             "rvh2/{}/{}/{:02}.txt.gz",
@@ -546,7 +542,7 @@ fn group_committer_sql_insert_par(committers: &[CommitEvent], obfuscate: bool) -
                             let mut sha_er = sha1::Sha1::new();
                             sha_er.update(chunk.actor.as_bytes());
                             sha_er.digest().to_string()
-                        },
+                        }
                         false => chunk.actor.clone(),
                     };
                     format!("({}, '{}')", chunk.repo_id, actor_name)
@@ -616,30 +612,29 @@ mod tests {
 
         items.push(CommitEvent {
             actor: "foo".to_string(),
-            repo_id: 1
+            repo_id: 1,
         });
         items.push(CommitEvent {
             actor: "bar".to_string(),
-            repo_id: 1
+            repo_id: 1,
         });
         // this dupe should go away after sorting:
         items.push(CommitEvent {
             actor: "bar".to_string(),
-            repo_id: 1
+            repo_id: 1,
         });
         items.push(CommitEvent {
             actor: "foo".to_string(),
-            repo_id: 2
+            repo_id: 2,
         });
         items.push(CommitEvent {
             actor: "bar".to_string(),
-            repo_id: 2
+            repo_id: 2,
         });
         items.push(CommitEvent {
             actor: "baz".to_string(),
-            repo_id: 2
+            repo_id: 2,
         });
-
 
         // ensure sorting removes dupes
         let old_len = items.len();
@@ -654,7 +649,10 @@ mod tests {
 
         let expected_sql_obf = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, '62cdb7020ff920e5aa642c3d4066950dd1f01f4d'), (2, '62cdb7020ff920e5aa642c3d4066950dd1f01f4d'), (2, 'bbe960a25ea311d21d40669e93df2003ba9b90a2'), (1, '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33'), (2, '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33') ON CONFLICT DO NOTHING;";
 
-        assert_eq!(expected_sql_obf, group_committer_sql_insert_par(&items, true));
+        assert_eq!(
+            expected_sql_obf,
+            group_committer_sql_insert_par(&items, true)
+        );
     }
 
     // Put multiple rows into a single INSERT statement, with ON CONFLICT clause
