@@ -534,35 +534,6 @@ fn dupes_in(repo_id_mappings: &[RepoIdToName]) -> bool {
 }
 
 // Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
-fn group_committer_sql_insert(committers: &[CommitEvent], obfuscate: bool) -> String {
-    committers
-        .chunks(10)
-        // par iter here?
-        .map(|chunk| {
-            let row_to_insert: String = chunk
-                .iter()
-                .map(|chunk| {
-                    let actor_name = match obfuscate {
-                        true => {
-                            let mut sha_er = sha1::Sha1::new();
-                            sha_er.update(chunk.actor.as_bytes());
-                            sha_er.digest().to_string()
-                        },
-                        false => chunk.actor.clone(),
-                    };
-                    format!("({}, '{}')", chunk.repo_id, actor_name)
-                })
-                .collect::<Vec<String>>()
-                .join(", ");
-
-            format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", row_to_insert)
-        })
-        .collect::<Vec<String>>()
-        .join("\n")
-}
-
-
-// Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
 fn group_committer_sql_insert_par(committers: &[CommitEvent], obfuscate: bool) -> String {
     committers
         .par_chunks(20)
@@ -639,7 +610,7 @@ mod tests {
     #[test]
     fn multi_row_insert_committers() {
         use rusty_von_humboldt::types::CommitEvent;
-        use group_committer_sql_insert;
+        use group_committer_sql_insert_par;
 
         let mut items: Vec<CommitEvent> = Vec::new();
 
@@ -679,11 +650,11 @@ mod tests {
         // group sql statement works
         let expected_sql = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, 'bar'), (2, 'bar'), (2, 'baz'), (1, 'foo'), (2, 'foo') ON CONFLICT DO NOTHING;";
 
-        assert_eq!(expected_sql, group_committer_sql_insert(&items, false));
+        assert_eq!(expected_sql, group_committer_sql_insert_par(&items, false));
 
         let expected_sql_obf = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, '62cdb7020ff920e5aa642c3d4066950dd1f01f4d'), (2, '62cdb7020ff920e5aa642c3d4066950dd1f01f4d'), (2, 'bbe960a25ea311d21d40669e93df2003ba9b90a2'), (1, '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33'), (2, '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33') ON CONFLICT DO NOTHING;";
 
-        assert_eq!(expected_sql_obf, group_committer_sql_insert(&items, true));
+        assert_eq!(expected_sql_obf, group_committer_sql_insert_par(&items, true));
     }
 
     // Put multiple rows into a single INSERT statement, with ON CONFLICT clause

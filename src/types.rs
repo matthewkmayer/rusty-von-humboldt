@@ -398,33 +398,6 @@ pub struct CommitEvent {
     pub repo_id: i64,
 }
 
-impl CommitEvent {
-    pub fn as_sql(&self, obfuscate: bool) -> String {
-        // Sometimes bad data can still get to here, skip if we don't have all the data required.
-        if self.repo_id == -1 || self.actor == "" {
-            return "".to_string();
-        }
-        let actor_name = match obfuscate {
-            true => {
-                let mut sha_er = sha1::Sha1::new();
-                sha_er.update(self.actor.as_bytes());
-                sha_er.digest().to_string()
-            },
-            false => self.actor.clone(),
-        };
-
-        let sql = format!(
-            "INSERT INTO committer_repo_id_names (repo_id, actor_name)
-            VALUES ({repo_id}, '{actor_name}')
-            ON CONFLICT DO NOTHING;",
-            repo_id = self.repo_id,
-            actor_name = actor_name,
-        );
-
-        sql
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct PrByActor {
     pub repo: Repo,
