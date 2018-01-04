@@ -28,6 +28,8 @@ pub struct Repo {
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct PullRequest {
     pub merged: Option<bool>,
+    #[serde(rename = "user")]
+    pub actor: Option<Actor>,
 }
 
 /// A git commit.
@@ -83,13 +85,33 @@ impl Event {
     }
 
     pub fn as_commit_event(&self) -> CommitEvent {
-        CommitEvent {
-            actor: match self.actor.login {
-                Some(ref actor_login) => actor_login.clone(),
-                None => "".to_string(),
-            },
-            repo_id: self.repo.id,
+        if self.event_type == "PullRequestEvent" {
+            CommitEvent {
+                actor: match self.payload {
+                    Some(ref payload) => match payload.pull_request {
+                        Some(ref pull_request) => match pull_request.actor {
+                            Some(ref actor) => match actor.login {
+                                Some(ref login) => login.clone(),
+                                None => "".to_string(),
+                            },
+                            None => "".to_string(),
+                        },
+                        None => "".to_string(),
+                    },
+                    None => "".to_string(),
+                },
+                repo_id: self.repo.id,
+            }
+        } else {
+            CommitEvent {
+                actor: match self.actor.login {
+                    Some(ref actor_login) => actor_login.clone(),
+                    None => "".to_string(),
+                },
+                repo_id: self.repo.id,
+            }
         }
+
     }
 
     // Also covers placeholder Events made in the constructor above
@@ -132,6 +154,112 @@ impl Event {
             },
             None => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate serde_json;
+
+    // Direct push to the repo counts as a commit
+    #[test]
+    fn direct_push_committer_gets_counted() {
+        use types::Event;
+        let commit_text = r#"
+        {
+  "id": "5785865382",
+  "type": "PushEvent",
+  "actor": {
+    "id": 1234,
+    "login": "direct_committer",
+    "display_login": "direct_committer",
+    "url": "https://api.github.com/users/direct_committer"
+    },
+  "repo": {
+    "id": 255,
+    "name": "foo/bar",
+    "url": "https://api.github.com/repos/foo/bar"
+  },
+  "payload": {
+    "push_id": 1234567,
+    "size": 1,
+    "distinct_size": 1
+  },
+  "created_at": "2017-05-01T07:00:00Z"
+}
+"#;
+        let event: Event = match serde_json::from_str(&commit_text) {
+            Ok(event) => event,
+            Err(err) => panic!("Found a weird line of json, got this error: {:?}.", err),
+        };
+        let commit_event = event.as_commit_event();
+
+        assert_eq!("direct_committer", commit_event.actor);
+        assert_eq!(255, commit_event.repo_id);
+    }
+
+    // Ensure we count the person who made the PR as a committer, not the person who accepted it:
+    #[test]
+    fn pull_request_committer_gets_counted() {
+        use types::Event;
+        let pr_text = r#"{
+  "id": "12345",
+  "type": "PullRequestEvent",
+  "actor": {
+    "id": 1,
+    "login": "owner-login",
+    "display_login": "owner-login"
+    },
+    "repo": {
+"id": 155,
+"name": "foo/reponame",
+"url": "https://api.github.com/repos/foo/reponame"
+},
+"payload": {
+"action": "closed",
+"pull_request": {
+"state": "closed",
+"user": {
+"id": 5,
+"login": "committer-login"
+},
+"created_at": "2017-04-30T13:14:51Z",
+"updated_at": "2017-05-01T07:01:53Z",
+"closed_at": "2017-05-01T07:01:53Z",
+"merged_at": "2017-05-01T07:01:53Z",
+"head": {
+"repo": {
+"id": 155,
+"name": "reponame"
+}
+},
+"base": {
+"label": "foo:master",
+"ref": "master",
+"sha": "a829c2e22381a1ff55824602127b9a7e440d7dc5",
+"repo": {
+"id": 1234,
+"name": "reponame",
+"full_name": "foo/reponame",
+"created_at": "2014-12-03T22:47:01Z",
+"updated_at": "2017-04-27T09:13:53Z",
+"pushed_at": "2017-05-01T07:01:53Z"
+}
+},
+"merged": true
+}
+},
+"public": true,
+"created_at": "2017-05-01T07:01:53Z"
+}"#;
+        let event: Event = match serde_json::from_str(&pr_text) {
+            Ok(event) => event,
+            Err(err) => panic!("Found a weird line of json, got this error: {:?}.", err),
+        };
+        let commit_event = event.as_commit_event();
+
+        assert_eq!("committer-login", commit_event.actor);
+        assert_eq!(155, commit_event.repo_id);
     }
 }
 

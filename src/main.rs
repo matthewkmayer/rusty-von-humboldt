@@ -636,42 +636,6 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
 
 #[cfg(test)]
 mod tests {
-    extern crate test;
-    use self::test::Bencher;
-
-    #[bench]
-    fn sql_generation(b: &mut Bencher) {
-        use rusty_von_humboldt::types::CommitEvent;
-        use group_committer_sql_insert;
-
-        b.iter(|| {
-            let mut events: Vec<CommitEvent> = Vec::with_capacity(300000);
-            for n in 0..300000 {
-                events.push(CommitEvent {
-                    actor: "foo".to_string(),
-                    repo_id: n
-                })
-            }
-            group_committer_sql_insert(&events, false);
-        });
-    }
-    #[bench]
-    fn parallel_sql_generation(b: &mut Bencher) {
-        use rusty_von_humboldt::types::CommitEvent;
-        use group_committer_sql_insert_par;
-
-        b.iter(|| {
-            let mut events: Vec<CommitEvent> = Vec::with_capacity(300000);
-            for n in 0..300000 {
-                events.push(CommitEvent {
-                    actor: "foo".to_string(),
-                    repo_id: n
-                })
-            }
-            group_committer_sql_insert_par(&events, false);
-        });
-    }
-
     #[test]
     fn multi_row_insert_committers() {
         use rusty_von_humboldt::types::CommitEvent;
