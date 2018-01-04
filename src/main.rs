@@ -11,7 +11,6 @@ extern crate rusoto_s3;
 extern crate serde;
 extern crate serde_json;
 extern crate sha1;
-extern crate stopwatch;
 
 use std::io::prelude::*;
 use std::env;
