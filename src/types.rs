@@ -28,8 +28,7 @@ pub struct Repo {
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct PullRequest {
     pub merged: Option<bool>,
-    #[serde(rename = "user")]
-    pub actor: Option<Actor>,
+    #[serde(rename = "user")] pub actor: Option<Actor>,
 }
 
 /// A git commit.
@@ -111,7 +110,6 @@ impl Event {
                 repo_id: self.repo.id,
             }
         }
-
     }
 
     // Also covers placeholder Events made in the constructor above
