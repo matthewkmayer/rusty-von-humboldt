@@ -27,7 +27,7 @@ use rusoto_core::{default_tls_client, DefaultCredentialsProviderSync, DispatchSi
                   ProvideAwsCredentials, Region};
 use rusoto_s3::{PutObjectRequest, S3, S3Client};
 
-const OBFUSCATE_COMMITTER_IDS: bool = false;
+const OBFUSCATE_COMMITTER_IDS: bool = true;
 
 /// MODE contains what mode to do: committer count or repo mappings as well as if it should
 /// upload results to s3 or not (dry run).
