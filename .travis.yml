@@ -1,0 +1,29 @@
+language: go
+
+install:
+  - make travis_setup
+
+script:
+  - make run test
+  - |
+    if [ "$TRAVIS_BRANCH" == "master" ]; then
+      make deploy
+    fi
+  - |
+    if [ "$TRAVIS_BRANCH" == "release" ]; then
+      DEPLOY_ENV=prod \
+      make dockerize
+      DEPLOY_ENV=prod \
+      DEPLOY_DOCKER_LABEL=release \
+      AWS_ACCESS_KEY_ID=$PROD_AWS_ACCESS_KEY_ID \
+      AWS_SECRET_ACCESS_KEY=$PROD_AWS_SECRET_ACCESS_KEY \
+      make deploy
+    fi
+notifications:
+  email: false
+  slack:
+    rooms:
+      - ionchannel:judViUieHy4ppRX1vYhok1HK#build
+
+services:
+  - docker
