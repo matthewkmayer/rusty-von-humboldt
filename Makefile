@@ -40,7 +40,7 @@ all: test build
 
 .PHONY: build
 build: dockerize ## Build the project
-	packer build packer.json
+	packer build big-guy/big-guy.json
 
 .PHONY: dockerize
 dockerize: ecr_login  ## Create a docker image of the project

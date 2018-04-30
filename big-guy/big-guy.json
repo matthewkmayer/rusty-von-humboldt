@@ -1,0 +1,53 @@
+{
+  "variables": {
+    "AWS_ACCESS_KEY_ID": "{{env `AWS_ACCESS_KEY_ID`}}",
+    "AWS_SECRET_ACCESS_KEY": "{{env `AWS_SECRET_ACCESS_KEY`}}",
+    "DOCKER_REPO": "{{env `DOCKER_REPO`}}",
+    "DOCKER_IMAGE_NAME": "{{env `DOCKER_IMAGE_NAME`}}",
+    "DOCKER_IMAGE_LABEL": "{{env `DOCKER_IMAGE_LABEL`}}",
+    "region": "us-east-1"
+  },
+  "builders": [{
+    "type": "amazon-ebs",
+    "access_key": "{{user `AWS_ACCESS_KEY_ID`}}",
+    "secret_key": "{{user `AWS_SECRET_ACCESS_KEY`}}",
+    "region": "us-east-1",
+    "source_ami_filter": {
+      "filters": {
+      "virtualization-type": "hvm",
+      "name": "ubuntu/images/*ubuntu-xenial-16.04-amd64-server-*",
+      "root-device-type": "ebs"
+      },
+      "owners": ["099720109477"],
+      "most_recent": true
+    },
+    "instance_type": "t2.small",
+    "ssh_username": "ubuntu",
+    "ami_name": "RvH-{{timestamp}}"
+  }],
+  "provisioners": [
+		  {
+            "type": "shell",
+	    		"execute_command": "echo 'packer' | sudo -S sh -E -c '{{ .Vars }} {{ .Path }}'",
+            "inline":[
+            	"curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -",
+            	"add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable\"",
+					"apt-get update -y",
+            	"apt-get install python-pip jq -y",
+            	"pip install awscli",
+            	"apt-cache policy docker-ce",
+            	"apt-get install docker-ce -y",
+            	"$(aws ecr get-login --region us-east-1 --no-include-email)",
+            	"docker pull $DOCKER_REPO/$DOCKER_IMAGE_NAME:$DOCKER_IMAGE_LABEL"
+            ],
+            "environment_vars":[
+			    "DOCKER_REPO={{user `DOCKER_REPO`}}",
+			    "DOCKER_IMAGE_NAME={{user `DOCKER_IMAGE_NAME`}}",
+			    "DOCKER_IMAGE_LABEL={{user `DOCKER_IMAGE_LABEL`}}",
+			    "AWS_ACCESS_KEY_ID={{user `AWS_ACCESS_KEY_ID`}}",
+			    "AWS_SECRET_ACCESS_KEY={{user `AWS_SECRET_ACCESS_KEY`}}",
+			    "AWS_DEFAULT_REGION={{user `region`}}"
+				]
+        }
+     ]
+}
