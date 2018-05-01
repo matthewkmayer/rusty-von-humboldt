@@ -1,4 +1,4 @@
-language: go
+language: none
 
 install:
   - make travis_setup
