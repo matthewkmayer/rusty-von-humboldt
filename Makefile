@@ -70,6 +70,7 @@ deploy_images:  ## Properly tag and push images for deployment
 	curl -s https://s3.amazonaws.com/public.ionchannel.io/files/scripts/travis_create_ecr_repo.sh | bash -s ionchannel/$(DOCKER_IMAGE_NAME) $(DEPLOY_DOCKER_LABEL)
 	docker tag $(DOCKER_REPO)/$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_LABEL) $(DOCKER_REPO)/$(DOCKER_IMAGE_NAME):$(DEPLOY_DOCKER_LABEL)
 	docker push $(DOCKER_REPO)/$(DOCKER_IMAGE_NAME):$(DEPLOY_DOCKER_LABEL)
+	packer build big-guy/big-guy.json
 
 .PHONY: travis_setup
 travis_setup: ## Setup the travis environmnet

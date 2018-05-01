@@ -4,7 +4,7 @@
     "AWS_SECRET_ACCESS_KEY": "{{env `AWS_SECRET_ACCESS_KEY`}}",
     "DOCKER_REPO": "{{env `DOCKER_REPO`}}",
     "DOCKER_IMAGE_NAME": "{{env `DOCKER_IMAGE_NAME`}}",
-    "DOCKER_IMAGE_LABEL": "{{env `DOCKER_IMAGE_LABEL`}}",
+    "DEPLOY_DOCKER_LABEL": "{{env `DEPLOY_DOCKER_LABEL`}}",
     "region": "us-east-1"
   },
   "builders": [{
@@ -38,12 +38,12 @@
             	"apt-cache policy docker-ce",
             	"apt-get install docker-ce -y",
             	"$(aws ecr get-login --region us-east-1 --no-include-email)",
-            	"docker pull $DOCKER_REPO/$DOCKER_IMAGE_NAME:$DOCKER_IMAGE_LABEL"
+            	"docker pull $DOCKER_REPO/$DOCKER_IMAGE_NAME:$DEPLOY_DOCKER_LABEL"
             ],
             "environment_vars":[
 			    "DOCKER_REPO={{user `DOCKER_REPO`}}",
 			    "DOCKER_IMAGE_NAME={{user `DOCKER_IMAGE_NAME`}}",
-			    "DOCKER_IMAGE_LABEL={{user `DOCKER_IMAGE_LABEL`}}",
+			    "DEPLOY_DOCKER_LABEL={{user `DEPLOY_DOCKER_LABEL`}}",
 			    "AWS_ACCESS_KEY_ID={{user `AWS_ACCESS_KEY_ID`}}",
 			    "AWS_SECRET_ACCESS_KEY={{user `AWS_SECRET_ACCESS_KEY`}}",
 			    "AWS_DEFAULT_REGION={{user `region`}}"
