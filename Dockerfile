@@ -7,8 +7,10 @@ ARG VERSION
 ARG GIT_COMMIT_HASH
 ARG ENVIRONMENT
 
+RUN apt-get install software-properties-common
+RUN add-apt-repository ppa:george-edison55/cmake-3.x
 RUN apt-get update
-RUN apt-get install g++ openssl pkg-config libssl-dev -y
+RUN apt-get install g++ openssl pkg-config libssl-dev cmake -y
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y && $HOME/.cargo/bin/rustc --version
 
 WORKDIR /usr/src/rusty-von-humboldt
@@ -21,6 +23,6 @@ LABEL org.metadata.build-date=$BUILD_DATE \
       org.metadata.name="RvH" \
       org.metadata.description="Ion Channel GA Data Ingestor"
 
-RUN $HOME/.cargo/bin/cargo install
+RUN $HOME/.cargo/bin/cargo install release
 
 CMD /root/.cargo/bin/rusty-von-humboldt
