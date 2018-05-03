@@ -23,6 +23,6 @@ LABEL org.metadata.build-date=$BUILD_DATE \
       org.metadata.name="RvH" \
       org.metadata.description="Ion Channel GA Data Ingestor"
 
-RUN $HOME/.cargo/bin/cargo install release
+RUN $HOME/.cargo/bin/cargo build --release && $HOME/.cargo/bin/cargo install
 
 CMD /root/.cargo/bin/rusty-von-humboldt
