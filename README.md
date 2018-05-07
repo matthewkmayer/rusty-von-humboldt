@@ -1,7 +1,8 @@
 # rusty-von-humboldt
-Exploring GitHub Archive with Rust
 
-https://www.githubarchive.org/
+[![Build Status](https://travis-ci.com/matthewkmayer/rusty-von-humboldt.svg?branch=master)](https://travis-ci.com/matthewkmayer/rusty-von-humboldt)
+
+Exploring GitHub Archive with Rust: https://www.githubarchive.org/
 
 ## Overview
 
