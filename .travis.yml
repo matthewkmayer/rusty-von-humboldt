@@ -7,3 +7,6 @@ os:
 
 script:
   - cargo test
+
+notifications:
+  email: false
