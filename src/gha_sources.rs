@@ -148,16 +148,15 @@ pub fn download_and_parse_old_file<
         }
     };
 
-    // attempting to let the compiler figure out we can cast this to a slice of u8 in the
-    // gzdecoder call below:
-    let read_body = result
+    let read_body: Vec<_> = result
         .body
         .expect("body should be preset")
         .concat2()
         .wait()
         .unwrap();
 
-    let decoder = GzDecoder::new(read_body)
+    // convert the Vec<u8> into a slice for the GzDecoder:
+    let decoder = GzDecoder::new(&read_body[..])
         .expect("Couldn't make a decoder");
     parse_ze_file_2014_older(BufReader::new(decoder))
 }
@@ -211,7 +210,16 @@ pub fn download_and_parse_file<
             }
         }
     };
-    let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
+
+    let read_body: Vec<_> = result
+        .body
+        .expect("body should be preset")
+        .concat2()
+        .wait()
+        .unwrap();
+
+    // conver the Vec<u8> into a slice for GzDecoder:
+    let decoder = GzDecoder::new(&read_body[..]).unwrap();
     parse_ze_file_2015_newer(BufReader::new(decoder))
 }
 
