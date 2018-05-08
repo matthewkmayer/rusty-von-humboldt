@@ -23,8 +23,7 @@ use flate2::write::GzEncoder;
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
-use rusoto_core::{DefaultCredentialsProviderSync, DispatchSignedRequest,
-                  ProvideAwsCredentials, Region};
+use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
 use rusoto_s3::{PutObjectRequest, S3, S3Client};
 
 const OBFUSCATE_COMMITTER_IDS: bool = true;
@@ -421,8 +420,8 @@ fn make_list() -> Vec<String> {
 
 /// Get all events from the file specified on S3
 fn get_event_subset<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
+    P: ProvideAwsCredentials + Sync + Send + 'static,
+    D: DispatchSignedRequest + Sync + Send + 'static,
 >(
     chunk: &[String],
     client: &S3Client<P, D>,
@@ -436,8 +435,8 @@ fn get_event_subset<
 
 /// Get commit/PR events from the file specified on S3
 fn get_event_subset_committers<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
+    P: ProvideAwsCredentials + Sync + Send + 'static,
+    D: DispatchSignedRequest + Sync + Send + 'static,
 >(
     chunk: &[String],
     client: &S3Client<P, D>,

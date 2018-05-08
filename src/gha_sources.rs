@@ -100,10 +100,10 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 }
 
 /// Download the specified file and parse into pre-2015 events.
-pub fn download_and_parse_old_file<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
->(
+pub fn download_and_parse_old_file <
+    P: ProvideAwsCredentials + Sync + Send + 'static,
+    D: DispatchSignedRequest + Sync + Send + 'static
+> (
     file_on_s3: &str,
     client: &S3Client<P, D>,
 ) -> Result<Vec<Pre2015Event>, String> {
@@ -163,8 +163,8 @@ pub fn download_and_parse_old_file<
 
 /// Download the specified file and parse into 2015 and later events.
 pub fn download_and_parse_file<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
+    P: ProvideAwsCredentials + Sync + Send + 'static,
+    D: DispatchSignedRequest + Sync + Send + 'static,
 >(
     file_on_s3: &str,
     client: &S3Client<P, D>,
