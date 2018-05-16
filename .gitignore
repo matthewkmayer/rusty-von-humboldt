@@ -14,3 +14,4 @@ Cargo.lock
 repo_mappings*.txt
 commiter_count*.txt
 .idea
+rls/
