@@ -23,8 +23,7 @@ use flate2::write::GzEncoder;
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
-use rusoto_core::{default_tls_client, DefaultCredentialsProviderSync, DispatchSignedRequest,
-                  ProvideAwsCredentials, Region};
+use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
 use rusoto_s3::{PutObjectRequest, S3, S3Client};
 
 const OBFUSCATE_COMMITTER_IDS: bool = true;
@@ -81,12 +80,7 @@ fn sinker() {
     let second_file_list = file_list.split_off(middle_of_file_list);
 
     let send_thread_a = thread::spawn(move || {
-        let client = S3Client::new(
-            default_tls_client().expect("Couldn't make TLS client"),
-            DefaultCredentialsProviderSync::new()
-                .expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-            Region::UsEast1,
-        );
+        let client = S3Client::simple(Region::UsEast1);
         for file in file_list.chunks(10) {
             let event_subset = match MODE.committer_count {
                 true => get_event_subset_committers(&file, &client),
@@ -103,12 +97,7 @@ fn sinker() {
     });
 
     let send_thread_b = thread::spawn(move || {
-        let client = S3Client::new(
-            default_tls_client().expect("Couldn't make TLS client"),
-            DefaultCredentialsProviderSync::new()
-                .expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-            Region::UsEast1,
-        );
+        let client = S3Client::simple(Region::UsEast1);
         for file in second_file_list.chunks(10) {
             let event_subset = match MODE.committer_count {
                 true => get_event_subset_committers(&file, &client),
@@ -239,13 +228,8 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
                 // We create a new client every time since the underlying connection pool can
                 // deadlock if all the connections were closed by the receiving end (S3).
                 // This bypasses that issue by creating a new pool every time.
-                let client = S3Client::new(
-                    default_tls_client().expect("Couldn't make TLS client"),
-                    DefaultCredentialsProviderSync::new()
-                        .expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-                    Region::UsEast1,
-                );
-                match client.put_object(&upload_request) {
+                let client = S3Client::simple(Region::UsEast1);
+                match client.put_object(&upload_request).sync() {
                     Ok(_) => println!(
                         "uploaded {} to {}",
                         upload_request.key, upload_request.bucket
@@ -360,40 +344,33 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
                          upload_request.key);
                 continue;
             }
-            let client = S3Client::new(
-                default_tls_client().expect("Couldn't make TLS client"),
-                DefaultCredentialsProviderSync::new()
-                    .expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-                Region::UsEast1,
-            );
+            let client = S3Client::simple(Region::UsEast1);
             println!("Uploading to S3.");
             // We create a new client every time since the underlying connection pool can
             // deadlock if all the connections were closed by the receiving end (S3).
             // This bypasses that issue by creating a new pool every time.
-            match client.put_object(&upload_request) {
+            match client.put_object(&upload_request).sync() {
                 Ok(_) => println!(
                     "uploaded {} to {}",
                     upload_request.key, upload_request.bucket
                 ),
                 Err(_) => {
                     thread::sleep(time::Duration::from_millis(100));
-                    match client.put_object(&upload_request) {
+                    match client.put_object(&upload_request).sync() {
                         Ok(_) => println!(
                             "uploaded {} to {}",
                             upload_request.key, upload_request.bucket
                         ),
                         Err(_) => {
                             thread::sleep(time::Duration::from_millis(1000));
-                            match client.put_object(&upload_request) {
+                            match client.put_object(&upload_request).sync() {
                                 Ok(_) => println!(
                                     "uploaded {} to {}",
                                     upload_request.key, upload_request.bucket
                                 ),
                                 Err(_) => {
-                                    let client = S3Client::new(default_tls_client().expect("Couldn't make TLS client"),
-                                        DefaultCredentialsProviderSync::new().expect("Couldn't get new copy of DefaultCredentialsProviderSync"),
-                                        Region::UsEast1);
-                                    match client.put_object(&upload_request) {
+                                    let client = S3Client::simple(Region::UsEast1);
+                                    match client.put_object(&upload_request).sync() {
                                         Ok(_) => println!(
                                             "uploaded {} to {} with new client",
                                             upload_request.key, upload_request.bucket
@@ -443,8 +420,8 @@ fn make_list() -> Vec<String> {
 
 /// Get all events from the file specified on S3
 fn get_event_subset<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
+    P: ProvideAwsCredentials + Sync + Send + 'static,
+    D: DispatchSignedRequest + Sync + Send + 'static,
 >(
     chunk: &[String],
     client: &S3Client<P, D>,
@@ -458,8 +435,8 @@ fn get_event_subset<
 
 /// Get commit/PR events from the file specified on S3
 fn get_event_subset_committers<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
+    P: ProvideAwsCredentials + Sync + Send + 'static,
+    D: DispatchSignedRequest + Sync + Send + 'static,
 >(
     chunk: &[String],
     client: &S3Client<P, D>,

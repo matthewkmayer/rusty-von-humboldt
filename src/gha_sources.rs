@@ -4,13 +4,14 @@ extern crate rusoto_core;
 extern crate rusoto_s3;
 extern crate serde;
 extern crate serde_json;
+extern crate futures;
 
 use std::io::{BufRead, BufReader};
 use std::env;
 use std::{thread, time};
-use rusoto_core::{default_tls_client, DefaultCredentialsProviderSync, DispatchSignedRequest,
-                  ProvideAwsCredentials, Region};
+use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
 use rusoto_s3::{GetObjectRequest, ListObjectsV2Request, S3, S3Client};
+use self::futures::{Future, Stream};
 use self::flate2::read::GzDecoder;
 use types::*;
 
@@ -25,11 +26,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         .expect("Need GHAHOURS set to number of hours (files) to process")
         .parse::<i64>()
         .expect("Please set GHAHOURS to an integer value");
-    let client = S3Client::new(
-        default_tls_client().unwrap(),
-        DefaultCredentialsProviderSync::new().unwrap(),
-        Region::UsEast1,
-    );
+    let client = S3Client::simple(Region::UsEast1);
 
     let mut key_count_to_request = 10;
     // single page if we want less than 1,000 items:
@@ -45,6 +42,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
     };
     let result = client
         .list_objects_v2(&list_obj_req)
+        .sync()
         .expect("Couldn't list items in bucket (v2)");
     let mut files: Vec<String> = Vec::new();
 
@@ -84,6 +82,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         };
         let inner_result = client
             .list_objects_v2(&list_obj_req)
+            .sync()
             .expect("Couldn't list items in bucket (v2)");
 
         for item in inner_result.contents.expect("Should have list of items") {
@@ -101,10 +100,10 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 }
 
 /// Download the specified file and parse into pre-2015 events.
-pub fn download_and_parse_old_file<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
->(
+pub fn download_and_parse_old_file <
+    P: ProvideAwsCredentials + Sync + Send + 'static,
+    D: DispatchSignedRequest + Sync + Send + 'static
+> (
     file_on_s3: &str,
     client: &S3Client<P, D>,
 ) -> Result<Vec<Pre2015Event>, String> {
@@ -116,31 +115,27 @@ pub fn download_and_parse_old_file<
         ..Default::default()
     };
 
-    let result = match client.get_object(&get_req) {
+    let result = match client.get_object(&get_req).sync() {
         Ok(s3_result) => s3_result,
         Err(_) => {
             thread::sleep(time::Duration::from_millis(50));
-            match client.get_object(&get_req) {
+            match client.get_object(&get_req).sync() {
                 Ok(s3_result) => s3_result,
                 Err(_) => {
                     thread::sleep(time::Duration::from_millis(1000));
-                    match client.get_object(&get_req) {
+                    match client.get_object(&get_req).sync() {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
+                            // This shouldn't happen now, but we'll remove it later:
+
                             // if we get another error it's likely related to the connection pool
                             // being in a weird state: make a new client which makes a new pool.
                             println!(
                                 "Failed to get {:?} from S3, Third attempt: {:?}",
                                 file_on_s3, err
                             );
-                            let client = S3Client::new(
-                                default_tls_client().expect("Couldn't make TLS client"),
-                                DefaultCredentialsProviderSync::new().expect(
-                                    "Couldn't get new copy of DefaultCredentialsProviderSync",
-                                ),
-                                Region::UsEast1,
-                            );
-                            match client.get_object(&get_req) {
+                            let client = S3Client::simple(Region::UsEast1);
+                            match client.get_object(&get_req).sync() {
                                 Ok(s3_result) => s3_result,
                                 Err(err) => {
                                     return Err(format!("{:?}", err));
@@ -153,15 +148,23 @@ pub fn download_and_parse_old_file<
         }
     };
 
-    let decoder = GzDecoder::new(result.body.expect("body should be preset"))
+    let read_body: Vec<_> = result
+        .body
+        .expect("body should be preset")
+        .concat2()
+        .wait()
+        .unwrap();
+
+    // convert the Vec<u8> into a slice for the GzDecoder:
+    let decoder = GzDecoder::new(&read_body[..])
         .expect("Couldn't make a decoder");
     parse_ze_file_2014_older(BufReader::new(decoder))
 }
 
 /// Download the specified file and parse into 2015 and later events.
 pub fn download_and_parse_file<
-    P: ProvideAwsCredentials + Sync + Send,
-    D: DispatchSignedRequest + Sync + Send,
+    P: ProvideAwsCredentials + Sync + Send + 'static,
+    D: DispatchSignedRequest + Sync + Send + 'static,
 >(
     file_on_s3: &str,
     client: &S3Client<P, D>,
@@ -174,32 +177,28 @@ pub fn download_and_parse_file<
         ..Default::default()
     };
 
-    let result = match client.get_object(&get_req) {
+    let result = match client.get_object(&get_req).sync() {
         Ok(s3_result) => s3_result,
         Err(_) => {
             // Retry on error
             thread::sleep(time::Duration::from_millis(50));
-            match client.get_object(&get_req) {
+            match client.get_object(&get_req).sync() {
                 Ok(s3_result) => s3_result,
                 Err(_) => {
                     thread::sleep(time::Duration::from_millis(1000));
-                    match client.get_object(&get_req) {
+                    match client.get_object(&get_req).sync() {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
+                            // This shouldn't happen now, but we'll remove it later:
+
                             // if we get another error it's likely related to the connection pool
                             // being in a weird state: make a new client which makes a new pool.
                             println!(
                                 "Failed to get {:?} from S3, Third attempt: {:?}",
                                 file_on_s3, err
                             );
-                            let client = S3Client::new(
-                                default_tls_client().expect("Couldn't make TLS client"),
-                                DefaultCredentialsProviderSync::new().expect(
-                                    "Couldn't get new copy of DefaultCredentialsProviderSync",
-                                ),
-                                Region::UsEast1,
-                            );
-                            match client.get_object(&get_req) {
+                            let client = S3Client::simple(Region::UsEast1);
+                            match client.get_object(&get_req).sync() {
                                 Ok(s3_result) => s3_result,
                                 Err(err) => {
                                     return Err(format!("{:?}", err));
@@ -211,7 +210,16 @@ pub fn download_and_parse_file<
             }
         }
     };
-    let decoder = GzDecoder::new(result.body.expect("body should be preset")).unwrap();
+
+    let read_body: Vec<_> = result
+        .body
+        .expect("body should be preset")
+        .concat2()
+        .wait()
+        .unwrap();
+
+    // conver the Vec<u8> into a slice for GzDecoder:
+    let decoder = GzDecoder::new(&read_body[..]).unwrap();
     parse_ze_file_2015_newer(BufReader::new(decoder))
 }
 
