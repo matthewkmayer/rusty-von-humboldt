@@ -12,7 +12,7 @@ use std::{thread, time};
 use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
 use rusoto_s3::{GetObjectRequest, ListObjectsV2Request, S3, S3Client};
 use self::futures::{Future, Stream};
-use self::flate2::read::GzDecoder;
+use self::flate2::bufread::GzDecoder;
 use types::*;
 
 const MAX_PAGE_SIZE: i64 = 500;
@@ -156,8 +156,7 @@ pub fn download_and_parse_old_file <
         .unwrap();
 
     // convert the Vec<u8> into a slice for the GzDecoder:
-    let decoder = GzDecoder::new(&read_body[..])
-        .expect("Couldn't make a decoder");
+    let decoder = GzDecoder::new(&read_body[..]);
     parse_ze_file_2014_older(BufReader::new(decoder))
 }
 
@@ -219,7 +218,7 @@ pub fn download_and_parse_file<
         .unwrap();
 
     // conver the Vec<u8> into a slice for GzDecoder:
-    let decoder = GzDecoder::new(&read_body[..]).unwrap();
+    let decoder = GzDecoder::new(&read_body[..]);
     parse_ze_file_2015_newer(BufReader::new(decoder))
 }
 
