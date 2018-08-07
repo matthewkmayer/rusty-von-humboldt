@@ -26,7 +26,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         .expect("Need GHAHOURS set to number of hours (files) to process")
         .parse::<i64>()
         .expect("Please set GHAHOURS to an integer value");
-    let client = S3Client::simple(Region::UsEast1);
+    let client = S3Client::new(Region::UsEast1);
 
     let mut key_count_to_request = 10;
     // single page if we want less than 1,000 items:
@@ -41,7 +41,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         ..Default::default()
     };
     let result = client
-        .list_objects_v2(&list_obj_req)
+        .list_objects_v2(list_obj_req)
         .sync()
         .expect("Couldn't list items in bucket (v2)");
     let mut files: Vec<String> = Vec::new();
@@ -81,7 +81,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
             ..Default::default()
         };
         let inner_result = client
-            .list_objects_v2(&list_obj_req)
+            .list_objects_v2(list_obj_req)
             .sync()
             .expect("Couldn't list items in bucket (v2)");
 
@@ -105,7 +105,7 @@ pub fn download_and_parse_old_file <
     D: DispatchSignedRequest + Sync + Send + 'static
 > (
     file_on_s3: &str,
-    client: &S3Client<P, D>,
+    client: &S3Client,
 ) -> Result<Vec<Pre2015Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
 
@@ -115,15 +115,15 @@ pub fn download_and_parse_old_file <
         ..Default::default()
     };
 
-    let result = match client.get_object(&get_req).sync() {
+    let result = match client.get_object(get_req.clone()).sync() {
         Ok(s3_result) => s3_result,
         Err(_) => {
             thread::sleep(time::Duration::from_millis(50));
-            match client.get_object(&get_req).sync() {
+            match client.get_object(get_req.clone()).sync() {
                 Ok(s3_result) => s3_result,
                 Err(_) => {
                     thread::sleep(time::Duration::from_millis(1000));
-                    match client.get_object(&get_req).sync() {
+                    match client.get_object(get_req.clone()).sync() {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
                             // This shouldn't happen now, but we'll remove it later:
@@ -134,8 +134,8 @@ pub fn download_and_parse_old_file <
                                 "Failed to get {:?} from S3, Third attempt: {:?}",
                                 file_on_s3, err
                             );
-                            let client = S3Client::simple(Region::UsEast1);
-                            match client.get_object(&get_req).sync() {
+                            let client = S3Client::new(Region::UsEast1);
+                            match client.get_object(get_req).sync() {
                                 Ok(s3_result) => s3_result,
                                 Err(err) => {
                                     return Err(format!("{:?}", err));
@@ -161,12 +161,9 @@ pub fn download_and_parse_old_file <
 }
 
 /// Download the specified file and parse into 2015 and later events.
-pub fn download_and_parse_file<
-    P: ProvideAwsCredentials + Sync + Send + 'static,
-    D: DispatchSignedRequest + Sync + Send + 'static,
->(
+pub fn download_and_parse_file(
     file_on_s3: &str,
-    client: &S3Client<P, D>,
+    client: &S3Client,
 ) -> Result<Vec<Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
 
@@ -176,16 +173,17 @@ pub fn download_and_parse_file<
         ..Default::default()
     };
 
-    let result = match client.get_object(&get_req).sync() {
+    let result = match client.get_object(get_req.clone()).sync() {
         Ok(s3_result) => s3_result,
         Err(_) => {
             // Retry on error
+            // TODO: dump the retries, as the bug in hyper isn't in this version of Rusoto
             thread::sleep(time::Duration::from_millis(50));
-            match client.get_object(&get_req).sync() {
+            match client.get_object(get_req.clone()).sync() {
                 Ok(s3_result) => s3_result,
                 Err(_) => {
                     thread::sleep(time::Duration::from_millis(1000));
-                    match client.get_object(&get_req).sync() {
+                    match client.get_object(get_req.clone()).sync() {
                         Ok(s3_result) => s3_result,
                         Err(err) => {
                             // This shouldn't happen now, but we'll remove it later:
@@ -196,8 +194,8 @@ pub fn download_and_parse_file<
                                 "Failed to get {:?} from S3, Third attempt: {:?}",
                                 file_on_s3, err
                             );
-                            let client = S3Client::simple(Region::UsEast1);
-                            match client.get_object(&get_req).sync() {
+                            let client = S3Client::new(Region::UsEast1);
+                            match client.get_object(get_req).sync() {
                                 Ok(s3_result) => s3_result,
                                 Err(err) => {
                                     return Err(format!("{:?}", err));
