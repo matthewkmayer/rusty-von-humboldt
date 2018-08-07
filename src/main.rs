@@ -15,7 +15,7 @@ extern crate sha1;
 use std::io::prelude::*;
 use std::env;
 use std::sync::mpsc::sync_channel;
-use std::{thread, time};
+use std::thread;
 use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
@@ -23,7 +23,7 @@ use flate2::write::GzEncoder;
 
 use rusty_von_humboldt::*;
 use rand::{thread_rng, Rng};
-use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
+use rusoto_core::Region;
 use rusoto_s3::{PutObjectRequest, StreamingBody, S3, S3Client};
 
 const OBFUSCATE_COMMITTER_IDS: bool = true;
@@ -221,6 +221,9 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
                 ..Default::default()
             };
 
+            let key_copy = upload_request.key.clone();
+            let bucket_copy = upload_request.bucket.clone();
+
             if MODE.dry_run {
                 println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
             } else {
@@ -232,9 +235,9 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
                 match client.put_object(upload_request).sync() {
                     Ok(_) => println!(
                         "uploaded {} to {}",
-                        upload_request.key, upload_request.bucket
+                        key_copy, bucket_copy
                     ),
-                    Err(_) => println!("Whoops, couldn't upload {}", upload_request.key),
+                    Err(_) => println!("Whoops, couldn't upload {}", key_copy),
                 }
             }
         })
