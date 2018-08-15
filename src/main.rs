@@ -4,7 +4,6 @@ extern crate chrono;
 extern crate flate2;
 #[macro_use]
 extern crate lazy_static;
-extern crate rand;
 extern crate rayon;
 extern crate rusoto_core;
 extern crate rusoto_s3;
@@ -15,16 +14,15 @@ extern crate sha1;
 use std::io::prelude::*;
 use std::env;
 use std::sync::mpsc::sync_channel;
-use std::{thread, time};
+use std::thread;
 use std::str::FromStr;
 use rayon::prelude::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
 use rusty_von_humboldt::*;
-use rand::{thread_rng, Rng};
-use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
-use rusoto_s3::{PutObjectRequest, S3, S3Client};
+use rusoto_core::Region;
+use rusoto_s3::{PutObjectRequest, StreamingBody, S3, S3Client};
 
 const OBFUSCATE_COMMITTER_IDS: bool = true;
 
@@ -64,7 +62,7 @@ fn main() {
 fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
-    let mut file_list = make_list();
+    let mut file_list = construct_list_of_ingest_files();
     let (send, recv) = sync_channel(1000000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
@@ -80,7 +78,7 @@ fn sinker() {
     let second_file_list = file_list.split_off(middle_of_file_list);
 
     let send_thread_a = thread::spawn(move || {
-        let client = S3Client::simple(Region::UsEast1);
+        let client = S3Client::new(Region::UsEast1);
         for file in file_list.chunks(10) {
             let event_subset = match MODE.committer_count {
                 true => get_event_subset_committers(&file, &client),
@@ -97,7 +95,7 @@ fn sinker() {
     });
 
     let send_thread_b = thread::spawn(move || {
-        let client = S3Client::simple(Region::UsEast1);
+        let client = S3Client::new(Region::UsEast1);
         for file in second_file_list.chunks(10) {
             let event_subset = match MODE.committer_count {
                 true => get_event_subset_committers(&file, &client),
@@ -217,9 +215,12 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
             let upload_request = PutObjectRequest {
                 bucket: dest_bucket.clone(),
                 key: file_name.to_owned(),
-                body: Some(compressed_results),
+                body: Some(StreamingBody::from(compressed_results)),
                 ..Default::default()
             };
+
+            let key_copy = upload_request.key.clone();
+            let bucket_copy = upload_request.bucket.clone();
 
             if MODE.dry_run {
                 println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.", upload_request.bucket, upload_request.key);
@@ -228,13 +229,13 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
                 // We create a new client every time since the underlying connection pool can
                 // deadlock if all the connections were closed by the receiving end (S3).
                 // This bypasses that issue by creating a new pool every time.
-                let client = S3Client::simple(Region::UsEast1);
-                match client.put_object(&upload_request).sync() {
+                let client = S3Client::new(Region::UsEast1);
+                match client.put_object(upload_request).sync() {
                     Ok(_) => println!(
                         "uploaded {} to {}",
-                        upload_request.key, upload_request.bucket
+                        key_copy, bucket_copy
                     ),
-                    Err(_) => println!("Whoops, couldn't upload {}", upload_request.key),
+                    Err(_) => println!("Whoops, couldn't upload {}", key_copy),
                 }
             }
         })
@@ -333,9 +334,12 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
         let upload_request = PutObjectRequest {
             bucket: dest_bucket.clone(),
             key: file_name.to_owned(),
-            body: Some(compressed_results),
+            body: Some(StreamingBody::from(compressed_results)),
             ..Default::default()
         };
+
+        let key_copy = upload_request.key.clone();
+        let bucket_copy = upload_request.bucket.clone();
 
         {
             if MODE.dry_run {
@@ -344,47 +348,17 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
                          upload_request.key);
                 continue;
             }
-            let client = S3Client::simple(Region::UsEast1);
+            let client = S3Client::new(Region::UsEast1);
             println!("Uploading to S3.");
             // We create a new client every time since the underlying connection pool can
             // deadlock if all the connections were closed by the receiving end (S3).
             // This bypasses that issue by creating a new pool every time.
-            match client.put_object(&upload_request).sync() {
+            match client.put_object(upload_request).sync() {
                 Ok(_) => println!(
                     "uploaded {} to {}",
-                    upload_request.key, upload_request.bucket
+                    key_copy, bucket_copy
                 ),
-                Err(_) => {
-                    thread::sleep(time::Duration::from_millis(100));
-                    match client.put_object(&upload_request).sync() {
-                        Ok(_) => println!(
-                            "uploaded {} to {}",
-                            upload_request.key, upload_request.bucket
-                        ),
-                        Err(_) => {
-                            thread::sleep(time::Duration::from_millis(1000));
-                            match client.put_object(&upload_request).sync() {
-                                Ok(_) => println!(
-                                    "uploaded {} to {}",
-                                    upload_request.key, upload_request.bucket
-                                ),
-                                Err(_) => {
-                                    let client = S3Client::simple(Region::UsEast1);
-                                    match client.put_object(&upload_request).sync() {
-                                        Ok(_) => println!(
-                                            "uploaded {} to {} with new client",
-                                            upload_request.key, upload_request.bucket
-                                        ),
-                                        Err(e) => println!(
-                                            "FOURTH ATTEMPT TO UPLOAD FAILED SO SAD. {:?}",
-                                            e
-                                        ),
-                                    }
-                                }
-                            };
-                        }
-                    };
-                }
+                Err(_) => panic!("TODO FIX ME")
             }
         }
     }
@@ -408,23 +382,10 @@ fn environment_check() {
         .expect("Please set GHAHOURS to an integer value");
 }
 
-/// Make the list of GHA input files.
-fn make_list() -> Vec<String> {
-    let mut file_list = construct_list_of_ingest_files();
-    let mut rng = thread_rng();
-    // Shuffling the list prevents hotspot reads from S3, boosting download performance.
-    rng.shuffle(&mut file_list);
-    println!("file list is now {:#?}", file_list);
-    file_list
-}
-
 /// Get all events from the file specified on S3
-fn get_event_subset<
-    P: ProvideAwsCredentials + Sync + Send + 'static,
-    D: DispatchSignedRequest + Sync + Send + 'static,
->(
+fn get_event_subset(
     chunk: &[String],
-    client: &S3Client<P, D>,
+    client: &S3Client,
 ) -> Vec<Event> {
     chunk
         .par_iter()
@@ -434,12 +395,9 @@ fn get_event_subset<
 }
 
 /// Get commit/PR events from the file specified on S3
-fn get_event_subset_committers<
-    P: ProvideAwsCredentials + Sync + Send + 'static,
-    D: DispatchSignedRequest + Sync + Send + 'static,
->(
+fn get_event_subset_committers(
     chunk: &[String],
-    client: &S3Client<P, D>,
+    client: &S3Client,
 ) -> Vec<Event> {
     let commit_events: Vec<Event> = chunk
         .par_iter()
