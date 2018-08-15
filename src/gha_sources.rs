@@ -96,6 +96,8 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         }
     }
 
+    println!("Parsing these files: {:#?}", files);
+
     files
 }
 
@@ -121,29 +123,7 @@ pub fn download_and_parse_old_file <
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(get_req.clone()).sync() {
                 Ok(s3_result) => s3_result,
-                Err(_) => {
-                    thread::sleep(time::Duration::from_millis(1000));
-                    match client.get_object(get_req.clone()).sync() {
-                        Ok(s3_result) => s3_result,
-                        Err(err) => {
-                            // This shouldn't happen now, but we'll remove it later:
-
-                            // if we get another error it's likely related to the connection pool
-                            // being in a weird state: make a new client which makes a new pool.
-                            println!(
-                                "Failed to get {:?} from S3, Third attempt: {:?}",
-                                file_on_s3, err
-                            );
-                            let client = S3Client::new(Region::UsEast1);
-                            match client.get_object(get_req).sync() {
-                                Ok(s3_result) => s3_result,
-                                Err(err) => {
-                                    return Err(format!("{:?}", err));
-                                }
-                            }
-                        }
-                    }
-                }
+                Err(err) => return Err(format!("{:?}", err)),
             }
         }
     };
@@ -176,34 +156,10 @@ pub fn download_and_parse_file(
     let result = match client.get_object(get_req.clone()).sync() {
         Ok(s3_result) => s3_result,
         Err(_) => {
-            // Retry on error
-            // TODO: dump the retries, as the bug in hyper isn't in this version of Rusoto
             thread::sleep(time::Duration::from_millis(50));
             match client.get_object(get_req.clone()).sync() {
                 Ok(s3_result) => s3_result,
-                Err(_) => {
-                    thread::sleep(time::Duration::from_millis(1000));
-                    match client.get_object(get_req.clone()).sync() {
-                        Ok(s3_result) => s3_result,
-                        Err(err) => {
-                            // This shouldn't happen now, but we'll remove it later:
-
-                            // if we get another error it's likely related to the connection pool
-                            // being in a weird state: make a new client which makes a new pool.
-                            println!(
-                                "Failed to get {:?} from S3, Third attempt: {:?}",
-                                file_on_s3, err
-                            );
-                            let client = S3Client::new(Region::UsEast1);
-                            match client.get_object(get_req).sync() {
-                                Ok(s3_result) => s3_result,
-                                Err(err) => {
-                                    return Err(format!("{:?}", err));
-                                }
-                            }
-                        }
-                    }
-                }
+                Err(err) => return Err(format!("{:?}", err)),
             }
         }
     };

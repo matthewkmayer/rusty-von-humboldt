@@ -4,7 +4,6 @@ extern crate chrono;
 extern crate flate2;
 #[macro_use]
 extern crate lazy_static;
-extern crate rand;
 extern crate rayon;
 extern crate rusoto_core;
 extern crate rusoto_s3;
@@ -22,7 +21,6 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 
 use rusty_von_humboldt::*;
-use rand::{thread_rng, Rng};
 use rusoto_core::Region;
 use rusoto_s3::{PutObjectRequest, StreamingBody, S3, S3Client};
 
@@ -64,7 +62,7 @@ fn main() {
 fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
-    let mut file_list = make_list();
+    let mut file_list = construct_list_of_ingest_files();
     let (send, recv) = sync_channel(1000000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
@@ -382,16 +380,6 @@ fn environment_check() {
         .expect("Need GHAHOURS set to number of hours (files) to process")
         .parse::<i64>()
         .expect("Please set GHAHOURS to an integer value");
-}
-
-/// Make the list of GHA input files.
-fn make_list() -> Vec<String> {
-    let mut file_list = construct_list_of_ingest_files();
-    let mut rng = thread_rng();
-    // Shuffling the list prevents hotspot reads from S3, boosting download performance.
-    rng.shuffle(&mut file_list);
-    println!("file list is now {:#?}", file_list);
-    file_list
 }
 
 /// Get all events from the file specified on S3
