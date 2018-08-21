@@ -15,3 +15,4 @@ repo_mappings*.txt
 commiter_count*.txt
 .idea
 rls/
+packer_setup.sh

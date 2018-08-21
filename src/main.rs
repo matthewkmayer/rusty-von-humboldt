@@ -47,6 +47,7 @@ lazy_static! {
 fn main() {
     println!("Welcome to Rusty von Humboldt.");
     environment_check();
+    println!("Environment Check is complete.");
     sinker();
     println!("This is Rusty von Humboldt, heading home.");
 }
