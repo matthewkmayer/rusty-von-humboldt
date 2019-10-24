@@ -1,18 +1,18 @@
 extern crate flate2;
+extern crate futures;
 extern crate rayon;
 extern crate rusoto_core;
 extern crate rusoto_s3;
 extern crate serde;
 extern crate serde_json;
-extern crate futures;
 
-use std::io::{BufRead, BufReader};
-use std::env;
-use std::{thread, time};
-use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
-use rusoto_s3::{GetObjectRequest, ListObjectsV2Request, S3, S3Client};
-use self::futures::{Future, Stream};
 use self::flate2::bufread::GzDecoder;
+use self::futures::{Future, Stream};
+use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
+use rusoto_s3::{GetObjectRequest, ListObjectsV2Request, S3Client, S3};
+use std::env;
+use std::io::{BufRead, BufReader};
+use std::{thread, time};
 use types::*;
 
 const MAX_PAGE_SIZE: i64 = 500;
@@ -68,7 +68,9 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 
     while more_to_go {
         // less than MAX_PAGE_SIZE items to request? Just request what we need.
-        if (files.len() as i64 - hours_to_process) <= MAX_PAGE_SIZE && (files.len() as i64 - hours_to_process) > 0 {
+        if (files.len() as i64 - hours_to_process) <= MAX_PAGE_SIZE
+            && (files.len() as i64 - hours_to_process) > 0
+        {
             key_count_to_request = (files.len() as i64 - hours_to_process) as i64;
         } else {
             key_count_to_request = MAX_PAGE_SIZE;
@@ -102,10 +104,10 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 }
 
 /// Download the specified file and parse into pre-2015 events.
-pub fn download_and_parse_old_file <
+pub fn download_and_parse_old_file<
     P: ProvideAwsCredentials + Sync + Send + 'static,
-    D: DispatchSignedRequest + Sync + Send + 'static
-> (
+    D: DispatchSignedRequest + Sync + Send + 'static,
+>(
     file_on_s3: &str,
     client: &S3Client,
 ) -> Result<Vec<Pre2015Event>, String> {
@@ -133,7 +135,8 @@ pub fn download_and_parse_old_file <
         .expect("body should be preset")
         .concat2()
         .wait()
-        .unwrap().to_vec();
+        .unwrap()
+        .to_vec();
 
     // convert the Vec<u8> into a slice for the GzDecoder:
     let decoder = GzDecoder::new(&read_body[..]);
@@ -141,10 +144,7 @@ pub fn download_and_parse_old_file <
 }
 
 /// Download the specified file and parse into 2015 and later events.
-pub fn download_and_parse_file(
-    file_on_s3: &str,
-    client: &S3Client,
-) -> Result<Vec<Event>, String> {
+pub fn download_and_parse_file(file_on_s3: &str, client: &S3Client) -> Result<Vec<Event>, String> {
     let bucket = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
 
     let get_req = GetObjectRequest {
@@ -169,7 +169,8 @@ pub fn download_and_parse_file(
         .expect("body should be preset")
         .concat2()
         .wait()
-        .unwrap().to_vec();
+        .unwrap()
+        .to_vec();
 
     // conver the Vec<u8> into a slice for GzDecoder:
     let decoder = GzDecoder::new(&read_body[..]);

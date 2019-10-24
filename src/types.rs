@@ -1,10 +1,10 @@
 extern crate sha1;
 
-use std::fmt::Display;
-use std::str::FromStr;
+use chrono::{DateTime, TimeZone, Utc};
 use serde::de::{self, Deserialize, Deserializer};
 use serde_json::Value;
-use chrono::{DateTime, TimeZone, Utc};
+use std::fmt::Display;
+use std::str::FromStr;
 
 // source events from github archive
 
@@ -13,14 +13,16 @@ use chrono::{DateTime, TimeZone, Utc};
 /// If the ID isn't included we use a placeholder value.
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Actor {
-    #[serde(default = "id_not_specified")] pub id: i64,
+    #[serde(default = "id_not_specified")]
+    pub id: i64,
     pub login: Option<String>,
 }
 
 /// GitHub repository.  Assuming the ID stays constant but the name can change.
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Repo {
-    #[serde(default = "id_not_specified")] pub id: i64,
+    #[serde(default = "id_not_specified")]
+    pub id: i64,
     pub name: String,
 }
 
@@ -28,7 +30,8 @@ pub struct Repo {
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct PullRequest {
     pub merged: Option<bool>,
-    #[serde(rename = "user")] pub actor: Option<Actor>,
+    #[serde(rename = "user")]
+    pub actor: Option<Actor>,
 }
 
 /// A git commit.
@@ -41,16 +44,19 @@ pub struct Commit {
 #[derive(Deserialize, Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Payload {
     pub action: Option<String>,
-    #[serde(rename = "pull_request")] pub pull_request: Option<PullRequest>,
+    #[serde(rename = "pull_request")]
+    pub pull_request: Option<PullRequest>,
     pub commits: Option<Vec<Commit>>,
 }
 
 /// 2015 and later github archive event.
 #[derive(Deserialize, Debug, Clone)]
 pub struct Event {
-    #[serde(deserialize_with = "from_str")] pub id: i64,
+    #[serde(deserialize_with = "from_str")]
+    pub id: i64,
     pub created_at: DateTime<Utc>,
-    #[serde(rename = "type")] pub event_type: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
     pub actor: Actor,
     pub repo: Repo,
     pub payload: Option<Payload>,
@@ -316,7 +322,8 @@ impl<'de> Deserialize<'de> for Pre2015Actor {
 pub struct Pre2015Event {
     pub repository: Option<Repo>,
     pub repo: Option<Repo>,
-    #[serde(rename = "type")] pub event_type: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
     pub actor: Pre2015Actor,
     pub created_at: String,
     pub payload: Option<OldPayload>,
