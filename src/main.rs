@@ -64,12 +64,15 @@ fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
     let mut file_list = construct_list_of_ingest_files();
-    let (send, recv) = sync_channel(1000000);
+    let (send, recv) = sync_channel(1_000_000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
-    let thread = thread::spawn(move || match MODE.committer_count {
-        true => do_work_son(recv, dest_bucket),
-        false => do_repo_work_son(recv, dest_bucket),
+    let thread = thread::spawn(move || {
+        if MODE.committer_count {
+            do_work_son(recv, dest_bucket)
+        } else {
+            do_repo_work_son(recv, dest_bucket)
+        }
     });
 
     // send things all threaded like
@@ -81,13 +84,14 @@ fn sinker() {
     let send_thread_a = thread::spawn(move || {
         let client = S3Client::new(Region::UsEast1);
         for file in file_list.chunks(10) {
-            let event_subset = match MODE.committer_count {
-                true => get_event_subset_committers(&file, &client),
-                false => get_event_subset(&file, &client),
+            let event_subset = if MODE.committer_count {
+                get_event_subset_committers(&file, &client)
+            } else {
+                get_event_subset(&file, &client)
             };
             for event in event_subset {
                 let event_item = EventWorkItem {
-                    event: event,
+                    event,
                     no_more_work: false,
                 };
                 send_a.send(event_item).expect("Should have sent event.");
@@ -98,13 +102,14 @@ fn sinker() {
     let send_thread_b = thread::spawn(move || {
         let client = S3Client::new(Region::UsEast1);
         for file in second_file_list.chunks(10) {
-            let event_subset = match MODE.committer_count {
-                true => get_event_subset_committers(&file, &client),
-                false => get_event_subset(&file, &client),
+            let event_subset = if MODE.committer_count {
+                get_event_subset_committers(&file, &client)
+            } else {
+                get_event_subset(&file, &client)
             };
             for event in event_subset {
                 let event_item = EventWorkItem {
-                    event: event,
+                    event,
                     no_more_work: false,
                 };
                 send_b
@@ -142,7 +147,7 @@ fn sinker() {
 
 // dudupe RepoIdToName: if repo_id and repo_name are the same we can ditch one
 fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: String) {
-    let events_to_hold = 15000000;
+    let events_to_hold = 15_000_000;
     let mut wrap_things_up = false;
     let mut repo_mappings: Vec<RepoIdToName> = Vec::with_capacity(events_to_hold);
     let mut sql_collector: Vec<String> = Vec::new();
@@ -166,7 +171,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
                     panic!("receiving error");
                 }
             };
-            if repo_mappings.len() % 2000000 == 0 {
+            if repo_mappings.len() % 2_000_000 == 0 {
                 println!("Repo mapping size: {}", repo_mappings.len());
                 repo_mappings.sort();
                 repo_mappings.dedup_by(|a, b| a.repo_id == b.repo_id && a.repo_name == b.repo_name);
@@ -195,7 +200,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
         println!("Converting to sql");
         let mut inner_index = 1;
 
-        repo_mappings.chunks(1000000).for_each(|chunk| {
+        repo_mappings.chunks(1_000_000).for_each(|chunk| {
             sql_bytes = group_repo_id_sql_insert(chunk).as_bytes().to_vec();
 
             let file_name = format!(
@@ -246,8 +251,8 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
 /// Committer count
 fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: String) {
     // bump this higher
-    let events_to_hold = 18000000;
-    let dedup_threshold = 16000000;
+    let events_to_hold = 18_000_000;
+    let dedup_threshold = 16_000_000;
     let mut wrap_things_up = false;
     let mut committer_events: Vec<CommitEvent> = Vec::new();
     let mut sql_collector: Vec<String> = Vec::new();
@@ -287,7 +292,7 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
                 // if we've shrunk things to within 1,000,000 or so items of the max item size,
                 // we can call it deduped enough.
                 // Otherwise we spin on this and it's asymptotically closer and closer to the max item size.
-                if dedup_threshold - committer_events.len() < 700000 {
+                if dedup_threshold - committer_events.len() < 700_000 {
                     should_dedupe = false;
                 }
             }
@@ -470,14 +475,12 @@ fn group_committer_sql_insert_par(committers: &[CommitEvent], obfuscate: bool) -
             let row_to_insert: String = chunk
                 .iter()
                 .map(|chunk| {
-                    let actor_name = match obfuscate {
-                        true => {
-                            let mut sha_er = sha1::Sha1::new();
-                            sha_er.update(chunk.actor.as_bytes());
-                            sha_er.digest().to_string()
-                        }
-                        false => chunk.actor.clone(),
-                    };
+                    let actor_name = if obfuscate {
+                        let mut sha_er = sha1::Sha1::new();
+                        sha_er.update(chunk.actor.as_bytes());
+                        sha_er.digest().to_string()
+                    } else { chunk.actor.clone() };
+
                     format!("({}, '{}')", chunk.repo_id, actor_name)
                 })
                 .collect::<Vec<String>>()
