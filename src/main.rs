@@ -538,7 +538,7 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
 mod tests {
     #[test]
     fn multi_row_insert_committers() {
-        use group_committer_sql_insert_par;
+        use crate::group_committer_sql_insert_par;
         use rusty_von_humboldt::types::CommitEvent;
 
         let mut items: Vec<CommitEvent> = Vec::new();
@@ -592,7 +592,7 @@ mod tests {
     #[test]
     fn multi_row_insert_sql() {
         use chrono::{TimeZone, Utc};
-        use group_repo_id_sql_insert;
+        use crate::group_repo_id_sql_insert;
         use rusty_von_humboldt::types::RepoIdToName;
 
         let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
@@ -624,7 +624,7 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
     #[test]
     fn multi_row_with_dupes_insert_sql() {
         use chrono::{TimeZone, Utc};
-        use group_repo_id_sql_insert;
+        use crate::group_repo_id_sql_insert;
         use rusty_von_humboldt::types::RepoIdToName;
 
         let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)

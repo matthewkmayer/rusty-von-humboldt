@@ -13,7 +13,7 @@ use rusoto_s3::{GetObjectRequest, ListObjectsV2Request, S3Client, S3};
 use std::env;
 use std::io::{BufRead, BufReader};
 use std::{thread, time};
-use types::*;
+use crate::types::*;
 
 const MAX_PAGE_SIZE: i64 = 500;
 
