@@ -68,8 +68,8 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 
     while more_to_go {
         // less than MAX_PAGE_SIZE items to request? Just request what we need.
-        if (files.len() - (hours_to_process as usize)) <= MAX_PAGE_SIZE as usize {
-            key_count_to_request = (files.len() - (hours_to_process as usize)) as i64;
+        if (files.len() as i64 - hours_to_process) <= MAX_PAGE_SIZE {
+            key_count_to_request = (files.len() as i64 - hours_to_process) as i64;
         } else {
             key_count_to_request = MAX_PAGE_SIZE;
         }
@@ -133,7 +133,7 @@ pub fn download_and_parse_old_file <
         .expect("body should be preset")
         .concat2()
         .wait()
-        .unwrap();
+        .unwrap().to_vec();
 
     // convert the Vec<u8> into a slice for the GzDecoder:
     let decoder = GzDecoder::new(&read_body[..]);
@@ -169,7 +169,7 @@ pub fn download_and_parse_file(
         .expect("body should be preset")
         .concat2()
         .wait()
-        .unwrap();
+        .unwrap().to_vec();
 
     // conver the Vec<u8> into a slice for GzDecoder:
     let decoder = GzDecoder::new(&read_body[..]);

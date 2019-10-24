@@ -26,9 +26,9 @@ use rusoto_s3::{PutObjectRequest, StreamingBody, S3, S3Client};
 
 const OBFUSCATE_COMMITTER_IDS: bool = true;
 
-/// MODE contains what mode to do: committer count or repo mappings as well as if it should
-/// upload results to s3 or not (dry run).
 lazy_static! {
+    /// MODE contains what mode to do: committer count or repo mappings as well as if it should
+    /// upload results to s3 or not (dry run).
     static ref MODE: Mode = Mode {
         committer_count: true,
         repo_mapping: false,
