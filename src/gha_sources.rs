@@ -50,11 +50,12 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         files.push(item.key.expect("Key should exist for S3 item."));
     }
 
-    let mut more_to_go =
-        result.next_continuation_token.is_some() || result.continuation_token.is_some();
-    if files.len() >= hours_to_process as usize {
-        more_to_go = false;
-    }
+    let mut more_to_go = if files.len() >= hours_to_process as usize {
+        false
+    } else {
+        result.next_continuation_token.is_some() || result.continuation_token.is_some()
+    };
+
     let mut continue_token = String::new();
     match result.next_continuation_token {
         Some(ref token) => continue_token = token.to_owned(),
