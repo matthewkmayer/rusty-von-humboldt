@@ -11,18 +11,18 @@ extern crate serde;
 extern crate serde_json;
 extern crate sha1;
 
-use std::io::prelude::*;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use rayon::prelude::*;
 use std::env;
+use std::io::prelude::*;
+use std::str::FromStr;
 use std::sync::mpsc::sync_channel;
 use std::thread;
-use std::str::FromStr;
-use rayon::prelude::*;
-use flate2::Compression;
-use flate2::write::GzEncoder;
 
-use rusty_von_humboldt::*;
 use rusoto_core::Region;
-use rusoto_s3::{PutObjectRequest, StreamingBody, S3, S3Client};
+use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
+use rusty_von_humboldt::*;
 
 const OBFUSCATE_COMMITTER_IDS: bool = true;
 
@@ -355,11 +355,8 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
             // deadlock if all the connections were closed by the receiving end (S3).
             // This bypasses that issue by creating a new pool every time.
             match client.put_object(upload_request).sync() {
-                Ok(_) => println!(
-                    "uploaded {} to {}",
-                    key_copy, bucket_copy
-                ),
-                Err(_) => panic!("TODO FIX ME")
+                Ok(_) => println!("uploaded {} to {}", key_copy, bucket_copy),
+                Err(_) => panic!("TODO FIX ME"),
             }
         }
     }
@@ -384,26 +381,24 @@ fn environment_check() {
 }
 
 /// Get all events from the file specified on S3
-fn get_event_subset(
-    chunk: &[String],
-    client: &S3Client,
-) -> Vec<Event> {
+fn get_event_subset(chunk: &[String], client: &S3Client) -> Vec<Event> {
     chunk
         .par_iter()
         // todo: don't panic here (issue only when S3 kicks back errors)
-        .flat_map(|file_name| download_and_parse_file(file_name, &client).expect("Issue with file ingest"))
+        .flat_map(|file_name| {
+            download_and_parse_file(file_name, &client).expect("Issue with file ingest")
+        })
         .collect()
 }
 
 /// Get commit/PR events from the file specified on S3
-fn get_event_subset_committers(
-    chunk: &[String],
-    client: &S3Client,
-) -> Vec<Event> {
+fn get_event_subset_committers(chunk: &[String], client: &S3Client) -> Vec<Event> {
     let commit_events: Vec<Event> = chunk
         .par_iter()
         // todo: don't panic here
-        .flat_map(|file_name| download_and_parse_file(file_name, &client).expect("Issue with file ingest"))
+        .flat_map(|file_name| {
+            download_and_parse_file(file_name, &client).expect("Issue with file ingest")
+        })
         .filter(|ref x| x.is_commit_event())
         .collect();
     commit_events
@@ -445,7 +440,10 @@ struct EventWorkItem {
 
 lazy_static! {
     static ref YEAR: i32 = {
-        env::var("GHAYEAR").expect("Please set GHAYEAR env var").parse::<i32>().expect("Please set GHAYEAR env var to an integer value.")
+        env::var("GHAYEAR")
+            .expect("Please set GHAYEAR env var")
+            .parse::<i32>()
+            .expect("Please set GHAYEAR env var to an integer value.")
     };
 }
 
@@ -540,8 +538,8 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
 mod tests {
     #[test]
     fn multi_row_insert_committers() {
-        use rusty_von_humboldt::types::CommitEvent;
         use group_committer_sql_insert_par;
+        use rusty_von_humboldt::types::CommitEvent;
 
         let mut items: Vec<CommitEvent> = Vec::new();
 
@@ -593,9 +591,9 @@ mod tests {
     // Put multiple rows into a single INSERT statement, with ON CONFLICT clause
     #[test]
     fn multi_row_insert_sql() {
-        use rusty_von_humboldt::types::RepoIdToName;
         use chrono::{TimeZone, Utc};
         use group_repo_id_sql_insert;
+        use rusty_von_humboldt::types::RepoIdToName;
 
         let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
 VALUES (1, 'foo/repo-name', '2014-07-08 09:10:11 UTC'), (2, 'baz/a-repo', '2014-07-08 09:10:11 UTC'), (55, 'bar/a-repo-forked', '2014-07-08 09:10:11 UTC')
@@ -625,9 +623,9 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
 
     #[test]
     fn multi_row_with_dupes_insert_sql() {
-        use rusty_von_humboldt::types::RepoIdToName;
         use chrono::{TimeZone, Utc};
         use group_repo_id_sql_insert;
+        use rusty_von_humboldt::types::RepoIdToName;
 
         let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
 VALUES (1, 'foo/repo-name', '2014-07-08 09:10:11 UTC')
