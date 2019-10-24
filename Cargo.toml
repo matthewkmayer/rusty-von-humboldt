@@ -12,7 +12,7 @@ flate2 = "1.0"
 rusoto_core = "0.41"
 rusoto_s3 = "0.41"
 lazy_static = "1.0"
-md5 = "0.3"
+md5 = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
 sha1 = "0.6"
 futures = "0.1"

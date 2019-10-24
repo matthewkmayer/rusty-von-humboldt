@@ -68,7 +68,7 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
 
     while more_to_go {
         // less than MAX_PAGE_SIZE items to request? Just request what we need.
-        if (files.len() as i64 - hours_to_process) <= MAX_PAGE_SIZE {
+        if (files.len() as i64 - hours_to_process) <= MAX_PAGE_SIZE && (files.len() as i64 - hours_to_process) > 0 {
             key_count_to_request = (files.len() as i64 - hours_to_process) as i64;
         } else {
             key_count_to_request = MAX_PAGE_SIZE;
