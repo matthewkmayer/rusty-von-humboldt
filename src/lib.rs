@@ -8,7 +8,7 @@ extern crate serde_derive;
 extern crate serde_json;
 
 pub mod types;
-pub use types::*;
+pub use crate::types::*;
 
 pub mod gha_sources;
-pub use gha_sources::*;
+pub use crate::gha_sources::*;

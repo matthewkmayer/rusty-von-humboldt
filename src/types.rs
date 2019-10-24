@@ -168,7 +168,7 @@ mod tests {
     // Direct push to the repo counts as a commit
     #[test]
     fn direct_push_committer_gets_counted() {
-        use types::Event;
+        use crate::types::Event;
         let commit_text = r#"
         {
   "id": "5785865382",
@@ -205,7 +205,7 @@ mod tests {
     // Ensure we count the person who made the PR as a committer, not the person who accepted it:
     #[test]
     fn pull_request_committer_gets_counted() {
-        use types::Event;
+        use crate::types::Event;
         let pr_text = r#"{
   "id": "12345",
   "type": "PullRequestEvent",
