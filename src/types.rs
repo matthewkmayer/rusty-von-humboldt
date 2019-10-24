@@ -85,7 +85,7 @@ impl Event {
         RepoIdToName {
             repo_id: self.repo.id,
             repo_name: self.repo.name.clone(),
-            event_timestamp: self.created_at.clone(),
+            event_timestamp: self.created_at,
         }
     }
 
@@ -153,7 +153,7 @@ impl Event {
         }
         match self.payload {
             Some(ref payload) => match payload.commits {
-                Some(ref commits) => commits.len() > 0,
+                Some(ref commits) => !commits.is_empty(),
                 None => false,
             },
             None => false,
@@ -302,7 +302,7 @@ impl<'de> Deserialize<'de> for Pre2015Actor {
         }
 
         let v = Value::deserialize(deserializer)?;
-        if v.to_string().contains("{") {
+        if v.to_string().contains('{') {
             // sometimes it's just missing, we'll deal with it by ignoring it.
             let helper = ActorHelper::deserialize(&v).map_err(de::Error::custom)?;
             // println!("all good, helper is {:?}", helper);
@@ -346,7 +346,7 @@ impl Pre2015Event {
     }
 
     pub fn repo_id(&self) -> i64 {
-        let repo_id = match self.repo {
+        match self.repo {
             Some(ref repo) => repo.id,
             None => {
                 match self.repository {
@@ -354,8 +354,7 @@ impl Pre2015Event {
                     None => -1, // TODO: somehow ignore this event, as we can't use it
                 }
             }
-        };
-        repo_id
+        }
     }
 
     // TODO: if the event is old enough it just says "closed" for status, assume closed ones are accepted.
@@ -423,15 +422,13 @@ impl RepoIdToName {
         if self.repo_id == -1 || self.repo_name == "" {
             return "".to_string();
         }
-        let sql = format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
+        format!("INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
             VALUES ({repo_id}, '{repo_name}', '{event_timestamp}')
             ON CONFLICT (repo_id) DO UPDATE SET (repo_name, event_timestamp) = ('{repo_name}', '{event_timestamp}')
             WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp < EXCLUDED.event_timestamp;",
             repo_id = self.repo_id,
             repo_name = self.repo_name,
-            event_timestamp = self.event_timestamp).replace("\n", "");
-
-        sql
+            event_timestamp = self.event_timestamp).replace("\n", "")
     }
 }
 

@@ -8,12 +8,12 @@ extern crate serde_json;
 
 use self::flate2::bufread::GzDecoder;
 use self::futures::{Future, Stream};
+use crate::types::*;
 use rusoto_core::{DispatchSignedRequest, ProvideAwsCredentials, Region};
 use rusoto_s3::{GetObjectRequest, ListObjectsV2Request, S3Client, S3};
 use std::env;
 use std::io::{BufRead, BufReader};
 use std::{thread, time};
-use crate::types::*;
 
 const MAX_PAGE_SIZE: i64 = 500;
 
@@ -28,11 +28,11 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         .expect("Please set GHAHOURS to an integer value");
     let client = S3Client::new(Region::UsEast1);
 
-    let mut key_count_to_request = 10;
-    // single page if we want less than 1,000 items:
-    if hours_to_process as i64 <= MAX_PAGE_SIZE {
-        key_count_to_request = hours_to_process;
-    }
+    let mut key_count_to_request = if hours_to_process as i64 <= MAX_PAGE_SIZE {
+        hours_to_process
+    } else {
+        10
+    };
 
     let list_obj_req = ListObjectsV2Request {
         bucket: bucket.to_owned(),

@@ -591,8 +591,8 @@ mod tests {
     // Put multiple rows into a single INSERT statement, with ON CONFLICT clause
     #[test]
     fn multi_row_insert_sql() {
-        use chrono::{TimeZone, Utc};
         use crate::group_repo_id_sql_insert;
+        use chrono::{TimeZone, Utc};
         use rusty_von_humboldt::types::RepoIdToName;
 
         let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
@@ -623,8 +623,8 @@ WHERE repo_mapping.repo_id = EXCLUDED.repo_id AND repo_mapping.event_timestamp <
 
     #[test]
     fn multi_row_with_dupes_insert_sql() {
-        use chrono::{TimeZone, Utc};
         use crate::group_repo_id_sql_insert;
+        use chrono::{TimeZone, Utc};
         use rusty_von_humboldt::types::RepoIdToName;
 
         let expected = "INSERT INTO repo_mapping (repo_id, repo_name, event_timestamp)
