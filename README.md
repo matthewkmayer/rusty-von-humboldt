@@ -43,3 +43,7 @@ the repository.
 Since repositories can be renamed on GitHub, we follow the repo ID. By using Postgres' upsert functionality we keep the
 most up to date name of the repository.  An example: repo ID of 1 is called `foo/bar` and is renamed to `foo/baz`. All
 committer counts to the repository are tracked and applied to the most recent name.
+
+### Disabling progress bar
+
+Use the `--no-default-features` flag to compile without progress bar output.
