@@ -142,6 +142,7 @@ fn sinker() {
         pb.finish_with_message("files downloaded");
         debug!("Fetched all {} files.", second_file_list.len());
     });
+    #[cfg(feature = "show_progress_bar")]
     m.join_and_clear().unwrap();
 
     // These join calls will block until the sending threads have completed all their work.
