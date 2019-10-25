@@ -25,9 +25,11 @@ Upload results to S3:
 
 ### Logging
 
-`RUST_LOG=info` or `RUST_LOG=debug` as an environment variable. Full example:
+`RUST_LOG=rusty_von_humboldt=info` or `RUST_LOG=rusty_von_humboldt=debug` as an environment variable. Full example:
 
-`RUST_LOG=debug DRYRUN=true GHABUCKET=sourcebucketname DESTBUCKET=destbucketname GHAYEAR=2016 GHAHOURS=1 cargo run --release`
+`RUST_LOG=rusty_von_humboldt=debug DRYRUN=true GHABUCKET=sourcebucketname DESTBUCKET=destbucketname GHAYEAR=2016 GHAHOURS=1 cargo run --release`
+
+If `RUST_LOG=debug` is set without the `rusty_von_humboldt`, other libraries will also log. Rusoto currently logs lots of information about HTTP requests/responses with this flag, so limiting the info to `RUST_LOG=rusty_von_humboldt=debug` is probably the most useful.
 
 ## Implemented behavior
 
