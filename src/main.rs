@@ -67,7 +67,7 @@ fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
     let mut file_list = construct_list_of_ingest_files();
-    let (send, recv) = sync_channel(1_000_000);
+    let (send, recv) = sync_channel(10_000_000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
     let thread = thread::spawn(move || {
@@ -113,6 +113,7 @@ fn sinker() {
             pb.inc(files_to_fetch.len() as u64);
         }
         pb.finish_with_message("files downloaded");
+        debug!("Fetched all {} files.", file_list.len());
     });
 
     let pb = m.add(ProgressBar::new(second_file_list.len() as u64));
