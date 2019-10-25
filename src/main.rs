@@ -21,6 +21,7 @@ use std::io::prelude::*;
 use std::str::FromStr;
 use std::sync::mpsc::sync_channel;
 use std::thread;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use rusoto_core::Region;
 use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
@@ -83,6 +84,14 @@ fn sinker() {
     let middle_of_file_list: usize = file_list.len() / 2;
     let second_file_list = file_list.split_off(middle_of_file_list);
 
+    let m = MultiProgress::new();
+    let sty = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+        .progress_chars("##-");
+
+    let pb = m.add(ProgressBar::new(file_list.len() as u64));
+    pb.set_style(sty.clone());
+
     let send_thread_a = thread::spawn(move || {
         let client = S3Client::new(Region::UsEast1);
         let mut c = 0;
@@ -101,9 +110,13 @@ fn sinker() {
                 send_a.send(event_item).expect("Should have sent event.");
             }
             c += files_to_fetch.len();
+            pb.inc(files_to_fetch.len() as u64);
         }
+        pb.finish_with_message("files downloaded");
     });
 
+    let pb = m.add(ProgressBar::new(second_file_list.len() as u64));
+    pb.set_style(sty.clone());
     let send_thread_b = thread::spawn(move || {
         let client = S3Client::new(Region::UsEast1);
         let mut c = 0;
@@ -124,9 +137,12 @@ fn sinker() {
                     .expect("Couldn't send event to channel b");
             }
             c += files_to_fetch.len();
+            pb.inc(files_to_fetch.len() as u64);
         }
+        pb.finish_with_message("files downloaded");
         debug!("Fetched all {} files.", second_file_list.len());
     });
+    m.join_and_clear().unwrap();
 
     // These join calls will block until the sending threads have completed all their work.
     match send_thread_a.join() {
