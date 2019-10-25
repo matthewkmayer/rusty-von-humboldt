@@ -10,6 +10,8 @@ extern crate rusoto_s3;
 extern crate serde;
 extern crate serde_json;
 extern crate sha1;
+#[macro_use]
+extern crate log;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -121,15 +123,15 @@ fn sinker() {
 
     // These join calls will block until the sending threads have completed all their work.
     match send_thread_a.join() {
-        Ok(_) => println!("Thread all wrapped up."),
-        Err(e) => println!("Thread didn't want to quit: {:?}", e),
+        Ok(_) => info!("Thread all wrapped up."),
+        Err(e) => warn!("Thread didn't want to quit: {:?}", e),
     }
     match send_thread_b.join() {
-        Ok(_) => println!("Thread all wrapped up."),
-        Err(e) => println!("Thread didn't want to quit: {:?}", e),
+        Ok(_) => info!("Thread all wrapped up."),
+        Err(e) => warn!("Thread didn't want to quit: {:?}", e),
     }
 
-    println!("We're done sending items.");
+    debug!("We're done sending items.");
     let event_item = EventWorkItem {
         event: Event::new(),
         no_more_work: true,
@@ -139,10 +141,10 @@ fn sinker() {
 
     // Wait for the worker thread to wrap up.
     match thread.join() {
-        Ok(_) => println!("Thread all wrapped up."),
-        Err(e) => println!("Thread didn't want to quit: {:?}", e),
+        Ok(_) => info!("Thread all wrapped up."),
+        Err(e) => warn!("Thread didn't want to quit: {:?}", e),
     }
-    println!("all wrapped up.");
+    info!("all wrapped up.");
 }
 
 // dudupe RepoIdToName: if repo_id and repo_name are the same we can ditch one
@@ -160,7 +162,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
         sql_collector.clear();
         sql_bytes.clear();
         if wrap_things_up {
-            println!("wrapping thread up.");
+            info!("wrapping thread up.");
             break;
         }
         // fetch work loop:
@@ -172,7 +174,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
                 }
             };
             if repo_mappings.len() % 2_000_000 == 0 {
-                println!("Repo mapping size: {}", repo_mappings.len());
+                debug!("Repo mapping size: {}", repo_mappings.len());
                 repo_mappings.sort();
                 repo_mappings.dedup_by(|a, b| a.repo_id == b.repo_id && a.repo_name == b.repo_name);
             }
@@ -183,7 +185,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
                 repo_mappings.push(item.event.as_repo_id_mapping());
             }
             if repo_mappings.len() == events_to_hold {
-                println!("\n\n\nWe got enough work to do!\n\n");
+                debug!("\n\n\nWe got enough work to do!\n\n");
                 break;
             }
         }
@@ -191,13 +193,13 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
         let old_size = repo_mappings.len();
         repo_mappings.sort();
         repo_mappings.dedup_by(|a, b| a.repo_id == b.repo_id && a.repo_name == b.repo_name);
-        println!(
+        debug!(
             "{:?}: We shrunk the repo events from {} to {}",
             thread::current().id(),
             old_size,
             repo_mappings.len()
         );
-        println!("Converting to sql");
+        info!("Converting to sql");
         let mut inner_index = 1;
 
         repo_mappings.chunks(1_000_000).for_each(|chunk| {
@@ -211,12 +213,12 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
                 inner_index
             );
             inner_index += 1;
-            println!("compressing and uploading to s3");
+            info!("compressing and uploading to s3");
 
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
             encoder.write_all(&sql_bytes).expect("encoding failed");
             let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
-            println!("Compression done.");
+            info!("Compression done.");
 
             let upload_request = PutObjectRequest {
                 bucket: dest_bucket.clone(),
@@ -266,7 +268,7 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
         sql_collector.clear();
         sql_bytes.clear();
         if wrap_things_up {
-            println!("wrapping thread up.");
+            info!("wrapping thread up.");
             break;
         }
 
@@ -282,7 +284,7 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
                 let old_size = committer_events.len();
                 committer_events.sort();
                 committer_events.dedup();
-                println!(
+                debug!(
                     "{:?}: Inner loop: we shrunk the committer events from {} to {}",
                     thread::current().id(),
                     old_size,
@@ -303,7 +305,7 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
                 committer_events.push(item.event.as_commit_event());
             }
             if committer_events.len() == events_to_hold {
-                println!("\n\n\nWe got enough work to do!\n\n");
+                debug!("\n\n\nWe got enough work to do!\n\n");
                 break;
             }
         }
@@ -311,7 +313,7 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
         let old_size = committer_events.len();
         committer_events.sort();
         committer_events.dedup();
-        println!(
+        debug!(
             "{:?}: We shrunk the committer events from {} to {}",
             thread::current().id(),
             old_size,
@@ -330,12 +332,12 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
         );
 
         // It'd be nice to fire this off to a thread:
-        println!("compressing and uploading to s3");
+        info!("compressing and uploading to s3");
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&sql_bytes).expect("encoding failed");
         let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
-        println!("Compression done.");
+        info!("Compression done.");
 
         let upload_request = PutObjectRequest {
             bucket: dest_bucket.clone(),
@@ -349,18 +351,18 @@ fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: Stri
 
         {
             if MODE.dry_run {
-                println!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.",
+                info!("Not uploading to S3, it's a dry run.  Would have uploaded to bucket {} and key {}.",
                          upload_request.bucket,
                          upload_request.key);
                 continue;
             }
             let client = S3Client::new(Region::UsEast1);
-            println!("Uploading to S3.");
+            info!("Uploading to S3.");
             // We create a new client every time since the underlying connection pool can
             // deadlock if all the connections were closed by the receiving end (S3).
             // This bypasses that issue by creating a new pool every time.
             match client.put_object(upload_request).sync() {
-                Ok(_) => println!("uploaded {} to {}", key_copy, bucket_copy),
+                Ok(_) => info!("uploaded {} to {}", key_copy, bucket_copy),
                 Err(_) => panic!("TODO FIX ME"),
             }
         }
@@ -383,6 +385,7 @@ fn environment_check() {
         .expect("Need GHAHOURS set to number of hours (files) to process")
         .parse::<i64>()
         .expect("Please set GHAHOURS to an integer value");
+    env_logger::init();
 }
 
 /// Get all events from the file specified on S3

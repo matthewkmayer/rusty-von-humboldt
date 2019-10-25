@@ -23,6 +23,12 @@ Upload results to S3:
 
 `DRYRUN=false GHABUCKET=sourcebucketname DESTBUCKET=destbucketname GHAYEAR=2016 GHAHOURS=1 cargo run --release`
 
+### Logging
+
+`RUST_LOG=info` or `RUST_LOG=debug` as an environment variable. Full example:
+
+`RUST_LOG=debug DRYRUN=true GHABUCKET=sourcebucketname DESTBUCKET=destbucketname GHAYEAR=2016 GHAHOURS=1 cargo run --release`
+
 ## Implemented behavior
 
 #### Committer count

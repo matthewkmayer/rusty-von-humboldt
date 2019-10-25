@@ -1,5 +1,6 @@
 extern crate flate2;
 extern crate futures;
+extern crate log;
 extern crate rayon;
 extern crate rusoto_core;
 extern crate rusoto_s3;
@@ -99,7 +100,8 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         }
     }
 
-    println!("Parsing these files: {:#?}", files);
+    info!("Found {} matching files to download.", files.len());
+    debug!("Parsing these files: {:#?}", files);
 
     files
 }
@@ -119,6 +121,8 @@ pub fn download_and_parse_old_file<
         key: file_on_s3.to_owned(),
         ..Default::default()
     };
+
+    debug!("Fetching {}", get_req.key);
 
     let result = match client.get_object(get_req.clone()).sync() {
         Ok(s3_result) => s3_result,
@@ -154,6 +158,8 @@ pub fn download_and_parse_file(file_on_s3: &str, client: &S3Client) -> Result<Ve
         ..Default::default()
     };
 
+    debug!("Fetching {}", get_req.key);
+
     let result = match client.get_object(get_req.clone()).sync() {
         Ok(s3_result) => s3_result,
         Err(_) => {
@@ -185,7 +191,7 @@ fn parse_ze_file_2014_older<R: BufRead>(mut contents: R) -> Result<Vec<Pre2015Ev
     while contents.read_line(&mut line).unwrap() > 0 {
         match serde_json::from_str(&line) {
             Ok(event) => events.push(event),
-            Err(err) => println!("Found a weird line of json, got this error: {:?}.", err),
+            Err(err) => warn!("Found a weird line of json, got this error: {:?}.", err),
         };
         line.clear();
     }
@@ -200,7 +206,7 @@ fn parse_ze_file_2015_newer<R: BufRead>(mut contents: R) -> Result<Vec<Event>, S
     while contents.read_line(&mut line).unwrap() > 0 {
         match serde_json::from_str(&line) {
             Ok(event) => events.push(event),
-            Err(err) => println!("Found a weird line of json, got this error: {:?}.", err),
+            Err(err) => warn!("Found a weird line of json, got this error: {:?}.", err),
         };
         line.clear();
     }
