@@ -85,11 +85,13 @@ fn sinker() {
 
     let send_thread_a = thread::spawn(move || {
         let client = S3Client::new(Region::UsEast1);
-        for file in file_list.chunks(10) {
+        let mut c = 0;
+        for files_to_fetch in file_list.chunks(10) {
+            debug!("Fetched {} files out of {}", c, file_list.len());
             let event_subset = if MODE.committer_count {
-                get_event_subset_committers(&file, &client)
+                get_event_subset_committers(&files_to_fetch, &client)
             } else {
-                get_event_subset(&file, &client)
+                get_event_subset(&files_to_fetch, &client)
             };
             for event in event_subset {
                 let event_item = EventWorkItem {
@@ -98,16 +100,19 @@ fn sinker() {
                 };
                 send_a.send(event_item).expect("Should have sent event.");
             }
+            c += files_to_fetch.len();
         }
     });
 
     let send_thread_b = thread::spawn(move || {
         let client = S3Client::new(Region::UsEast1);
-        for file in second_file_list.chunks(10) {
+        let mut c = 0;
+        for files_to_fetch in second_file_list.chunks(10) {
+            debug!("Fetched {} files out of {}", c, second_file_list.len());
             let event_subset = if MODE.committer_count {
-                get_event_subset_committers(&file, &client)
+                get_event_subset_committers(&files_to_fetch, &client)
             } else {
-                get_event_subset(&file, &client)
+                get_event_subset(&files_to_fetch, &client)
             };
             for event in event_subset {
                 let event_item = EventWorkItem {
@@ -118,7 +123,9 @@ fn sinker() {
                     .send(event_item)
                     .expect("Couldn't send event to channel b");
             }
+            c += files_to_fetch.len();
         }
+        debug!("Fetched all {} files.", second_file_list.len());
     });
 
     // These join calls will block until the sending threads have completed all their work.
