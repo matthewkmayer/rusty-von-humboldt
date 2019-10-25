@@ -305,7 +305,6 @@ impl<'de> Deserialize<'de> for Pre2015Actor {
         if v.to_string().contains('{') {
             // sometimes it's just missing, we'll deal with it by ignoring it.
             let helper = ActorHelper::deserialize(&v).map_err(de::Error::custom)?;
-            // println!("all good, helper is {:?}", helper);
             Ok(Pre2015Actor {
                 actor: helper.login,
             })
