@@ -12,6 +12,7 @@ extern crate serde_json;
 extern crate sha1;
 #[macro_use]
 extern crate log;
+extern crate crossbeam_channel;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -19,9 +20,9 @@ use rayon::prelude::*;
 use std::env;
 use std::io::prelude::*;
 use std::str::FromStr;
-use std::sync::mpsc::sync_channel;
 use std::thread;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use crossbeam_channel::bounded;
 
 use rusoto_core::Region;
 use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
@@ -67,7 +68,7 @@ fn sinker() {
     let dest_bucket = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     // take the receive channel for file locations
     let mut file_list = construct_list_of_ingest_files();
-    let (send, recv) = sync_channel(10_000_000);
+    let (send, recv) = bounded(10_000_000);
 
     // The receiving thread that accepts Events and converts them to the type needed.
     let thread = thread::spawn(move || {
@@ -95,7 +96,8 @@ fn sinker() {
     let send_thread_a = thread::spawn(move || {
         let client = S3Client::new(Region::UsEast1);
         let mut c = 0;
-        for files_to_fetch in file_list.chunks(10) {
+        pb.inc(0);
+        for files_to_fetch in file_list.chunks(2) {
             debug!("Fetched {} files out of {}", c, file_list.len());
             let event_subset = if MODE.committer_count {
                 get_event_subset_committers(&files_to_fetch, &client)
@@ -121,7 +123,8 @@ fn sinker() {
     let send_thread_b = thread::spawn(move || {
         let client = S3Client::new(Region::UsEast1);
         let mut c = 0;
-        for files_to_fetch in second_file_list.chunks(10) {
+        pb.inc(0);
+        for files_to_fetch in second_file_list.chunks(2) {
             debug!("Fetched {} files out of {}", c, second_file_list.len());
             let event_subset = if MODE.committer_count {
                 get_event_subset_committers(&files_to_fetch, &client)
@@ -173,7 +176,7 @@ fn sinker() {
 }
 
 // dudupe RepoIdToName: if repo_id and repo_name are the same we can ditch one
-fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: String) {
+fn do_repo_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: String) {
     let events_to_hold = 15_000_000;
     let mut wrap_things_up = false;
     let mut repo_mappings: Vec<RepoIdToName> = Vec::with_capacity(events_to_hold);
@@ -276,7 +279,7 @@ fn do_repo_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket:
 }
 
 /// Committer count
-fn do_work_son(recv: std::sync::mpsc::Receiver<EventWorkItem>, dest_bucket: String) {
+fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: String) {
     // bump this higher
     let events_to_hold = 18_000_000;
     let dedup_threshold = 16_000_000;
