@@ -14,15 +14,15 @@ extern crate sha1;
 extern crate log;
 extern crate crossbeam_channel;
 
+use crossbeam_channel::bounded;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::env;
 use std::io::prelude::*;
 use std::str::FromStr;
 use std::thread;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use crossbeam_channel::bounded;
 
 use rusoto_core::Region;
 use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
