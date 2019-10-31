@@ -34,8 +34,24 @@ lazy_static! {
     /// MODE contains what mode to do: committer count or repo mappings as well as if it should
     /// upload results to s3 or not (dry run).
     static ref MODE: Mode = Mode {
-        committer_count: true,
-        repo_mapping: false,
+        committer_count: {
+            match env::var("MODE"){
+                Ok(mode) => match mode.as_ref() {
+                    "committer_count" => true,
+                    _ => false,
+                },
+                Err(_) => false,
+            }
+        },
+        repo_mapping: {
+            match env::var("MODE"){
+                Ok(mode) => match mode.as_ref() {
+                    "repo_mapping" => true,
+                    _ => false,
+                },
+                Err(_) => false,
+            }
+        },
         dry_run: {
             match env::var("DRYRUN"){
                 Ok(dryrun) => match bool::from_str(&dryrun) {
@@ -414,6 +430,10 @@ fn environment_check() {
         .parse::<i64>()
         .expect("Please set GHAHOURS to an integer value");
     env_logger::init();
+    info!("Mode is {:?}", *MODE);
+    if MODE.committer_count == MODE.repo_mapping {
+        panic!("Please set either commiter count mode or repo mapping mode.");
+    }
 }
 
 /// Get all events from the file specified on S3
