@@ -8,6 +8,7 @@
 * Checked in Cargo.lock for reproducible builds
 * Added multi-line progress bar for file downloads
 * Switch to crossbeam channels from stdlib ones
+* Print hours of GHA processed and total run time at exit
 
 ### 0.1.0
 
