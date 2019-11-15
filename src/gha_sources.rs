@@ -58,8 +58,12 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
     };
 
     let mut continue_token = String::new();
-    if let Some(ref token) = result.next_continuation_token { continue_token = token.to_owned() }
-    if let Some(ref token) = result.continuation_token { continue_token = token.to_owned() }
+    if let Some(ref token) = result.next_continuation_token {
+        continue_token = token.to_owned()
+    }
+    if let Some(ref token) = result.continuation_token {
+        continue_token = token.to_owned()
+    }
 
     while more_to_go {
         // less than MAX_PAGE_SIZE items to request? Just request what we need.
@@ -87,7 +91,9 @@ pub fn construct_list_of_ingest_files() -> Vec<String> {
         }
         more_to_go = inner_result.next_continuation_token.is_some()
             && files.len() <= hours_to_process as usize;
-        if let Some(ref token) = inner_result.next_continuation_token { continue_token = token.to_owned() }
+        if let Some(ref token) = inner_result.next_continuation_token {
+            continue_token = token.to_owned()
+        }
     }
 
     info!("Found {} matching files to download.", files.len());

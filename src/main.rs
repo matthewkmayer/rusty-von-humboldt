@@ -23,6 +23,7 @@ use std::env;
 use std::io::prelude::*;
 use std::str::FromStr;
 use std::thread;
+use std::time::Instant;
 
 use rusoto_core::Region;
 use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
@@ -68,7 +69,19 @@ fn main() {
     println!("Welcome to Rusty von Humboldt.");
     environment_check();
     println!("Environment Check is complete.");
+    let now = Instant::now();
     sinker();
+
+    let hours_to_process = env::var("GHAHOURS")
+        .expect("Need GHAHOURS set to number of hours (files) to process")
+        .parse::<i64>()
+        .expect("Please set GHAHOURS to an integer value");
+
+    println!(
+        "Completed {} hours of GHA in {} seconds",
+        hours_to_process,
+        now.elapsed().as_secs()
+    );
     println!("This is Rusty von Humboldt, heading home.");
 }
 
