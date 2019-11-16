@@ -13,14 +13,14 @@ flate2 = "1.0"
 rusoto_core = "0.41"
 rusoto_s3 = "0.41"
 lazy_static = "1.0"
-md5 = "0.6"
+md5 = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 sha1 = "0.6"
 futures = "0.1"
 env_logger = "0.7"
 log = "0.4"
-indicatif = "0.12"
-crossbeam-channel = "0.3"
+indicatif = "0.13"
+crossbeam-channel = "0.4"
 
 [features]
 default = ["show_progress_bar"]
