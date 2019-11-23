@@ -1,4 +1,4 @@
-FROM phusion/baseimage
+FROM ekidd/rust-musl-builder:stable
 MAINTAINER dev@ionchannel.io
 
 ARG APP_NAME
@@ -7,13 +7,7 @@ ARG VERSION
 ARG GIT_COMMIT_HASH
 ARG ENVIRONMENT
 
-RUN apt-get install software-properties-common
-RUN add-apt-repository ppa:george-edison55/cmake-3.x
-RUN apt-get update
-RUN apt-get install g++ openssl pkg-config libssl-dev cmake -y
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y && $HOME/.cargo/bin/rustc --version
-
-WORKDIR /usr/src/rusty-von-humboldt
+WORKDIR /home/rust/src
 COPY . .
 
 LABEL org.metadata.build-date=$BUILD_DATE \
@@ -23,6 +17,9 @@ LABEL org.metadata.build-date=$BUILD_DATE \
       org.metadata.name="RvH" \
       org.metadata.description="Ion Channel GA Data Ingestor"
 
-RUN $HOME/.cargo/bin/cargo build --release && $HOME/.cargo/bin/cargo install
+RUN cargo build --release --target x86_64-unknown-linux-musl
 
-CMD /root/.cargo/bin/rusty-von-humboldt
+FROM alpine:3.10
+WORKDIR /usr/src/rusty-von-humboldt
+COPY --from=0 /home/rust/src/target/x86_64-unknown-linux-musl/release/rusty-von-humboldt ./rusty-von-humboldt
+CMD /usr/src/rusty-von-humboldt/rusty-von-humboldt
