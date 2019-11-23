@@ -5,6 +5,7 @@
 (entries go here)
 
 * Switched to a BTreeMap instead of Vec to get automatic deduplication of entries
+* Updated Rusoto to 0.42
 
 ### 0.2.0 - 11/15/2019
 
