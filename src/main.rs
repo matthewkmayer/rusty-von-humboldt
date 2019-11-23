@@ -19,6 +19,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
+use std::collections::BTreeMap;
 use std::env;
 use std::io::prelude::*;
 use std::str::FromStr;
@@ -309,21 +310,19 @@ fn do_repo_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucke
 
 /// Committer count
 fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: String) {
-    // bump this higher
-    let events_to_hold = 18_000_000;
-    let dedup_threshold = 16_000_000;
     let mut wrap_things_up = false;
-    let mut committer_events: Vec<CommitEvent> = Vec::new();
+    let mut commiter_events_bt: BTreeMap<CommitEvent, i64> = BTreeMap::new();
     let mut sql_collector: Vec<String> = Vec::new();
     let mut sql_bytes: Vec<u8> = Vec::new();
     let mut index = 0;
 
     loop {
         index += 1;
-        committer_events.clear();
-        let mut should_dedupe = true;
         sql_collector.clear();
         sql_bytes.clear();
+
+        // Should this be moved down to clear it right after we're done with it?
+        commiter_events_bt.clear();
         if wrap_things_up {
             info!("wrapping thread up.");
             break;
@@ -337,47 +336,22 @@ fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: St
                 }
             };
 
-            if should_dedupe && committer_events.len() % dedup_threshold == 0 {
-                let old_size = committer_events.len();
-                committer_events.sort();
-                committer_events.dedup();
-                debug!(
-                    "{:?}: Inner loop: we shrunk the committer events from {} to {}",
-                    thread::current().id(),
-                    old_size,
-                    committer_events.len()
-                );
-
-                // if we've shrunk things to within 1,000,000 or so items of the max item size,
-                // we can call it deduped enough.
-                // Otherwise we spin on this and it's asymptotically closer and closer to the max item size.
-                if dedup_threshold - committer_events.len() < 700_000 {
-                    should_dedupe = false;
-                }
-            }
             if item.no_more_work {
                 wrap_things_up = true;
                 break;
             } else {
-                committer_events.push(item.event.as_commit_event());
+                // TODO: we can make this count commits of actor to repo.
+                commiter_events_bt
+                    .entry(item.event.as_commit_event())
+                    .or_insert(1);
             }
-            if committer_events.len() == events_to_hold {
-                debug!("\n\n\nWe got enough work to do!\n\n");
+            if commiter_events_bt.len() == 20_000_000 {
+                debug!("We got enough work to do!");
                 break;
             }
         }
 
-        let old_size = committer_events.len();
-        committer_events.sort();
-        committer_events.dedup();
-        debug!(
-            "{:?}: We shrunk the committer events from {} to {}",
-            thread::current().id(),
-            old_size,
-            committer_events.len()
-        );
-
-        sql_bytes = group_committer_sql_insert_par(&committer_events, OBFUSCATE_COMMITTER_IDS)
+        sql_bytes = group_committer_sql_insert_par(&commiter_events_bt, OBFUSCATE_COMMITTER_IDS)
             .as_bytes()
             .to_vec();
 
@@ -415,6 +389,7 @@ fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: St
             }
             let client = S3Client::new(Region::UsEast1);
             info!("Uploading to S3.");
+            // TODO: is this true with 0.41 or later versions of Rusoto?
             // We create a new client every time since the underlying connection pool can
             // deadlock if all the connections were closed by the receiving end (S3).
             // This bypasses that issue by creating a new pool every time.
@@ -531,29 +506,34 @@ fn dupes_in(repo_id_mappings: &[RepoIdToName]) -> bool {
     false
 }
 
-// Since we're doing nothing on conflict, we don't need to separate out any duplicates we may have received.
-fn group_committer_sql_insert_par(committers: &[CommitEvent], obfuscate: bool) -> String {
-    committers
-        .par_chunks(20)
-        .map(|chunk| {
-            let row_to_insert: String = chunk
-                .iter()
-                .map(|chunk| {
-                    let actor_name = if obfuscate {
-                        let mut sha_er = sha1::Sha1::new();
-                        sha_er.update(chunk.actor.as_bytes());
-                        sha_er.digest().to_string()
-                    } else { chunk.actor.clone() };
+fn group_committer_sql_insert_par(
+    committers: &BTreeMap<CommitEvent, i64>,
+    obfuscate: bool,
+) -> String {
+    // Get the repo id and actor names
+    let a = committers
+        .into_iter()
+        .map(|commit_event| {
+            let actor_name = if obfuscate {
+                let mut sha_er = sha1::Sha1::new();
+                sha_er.update(commit_event.0.actor.as_bytes());
+                sha_er.digest().to_string()
+            } else {
+                commit_event.0.actor.clone()
+            };
 
-                    format!("({}, '{}')", chunk.repo_id, actor_name)
-                })
-                .collect::<Vec<String>>()
-                .join(", ");
-
-            format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", row_to_insert)
+            format!("({}, '{}')", commit_event.0.repo_id, actor_name)
         })
-        .collect::<Vec<String>>()
-        .join("\n")
+        .collect::<Vec<String>>();
+    // Chunk together the inserts by 20 to it's less work for Postgres.
+    // EG: instead of `insert into c (a, b) values (foo, bar)` many times, do this:
+    // `insert into c (a, b) values (foo, bar), (foo, baz), (foo, baz2)`
+    a.chunks(20).map(|c| {
+        let collector = c.iter().map(|x| x.clone()).collect::<Vec<String>>().join(", ");
+        format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", collector)
+    })
+    .collect::<Vec<String>>()
+    .join("\n")
 }
 
 // It's possible repo_id is in here twice, which causes an error from Postgres.
@@ -607,40 +587,42 @@ mod tests {
     fn multi_row_insert_committers() {
         use crate::group_committer_sql_insert_par;
         use rusty_von_humboldt::types::CommitEvent;
+        use std::collections::BTreeMap;
 
-        let mut items: Vec<CommitEvent> = Vec::new();
+        let mut items: BTreeMap<CommitEvent, i64> = BTreeMap::new();
 
-        items.push(CommitEvent {
-            actor: "foo".to_string(),
-            repo_id: 1,
-        });
-        items.push(CommitEvent {
-            actor: "bar".to_string(),
-            repo_id: 1,
-        });
-        // this dupe should go away after sorting:
-        items.push(CommitEvent {
-            actor: "bar".to_string(),
-            repo_id: 1,
-        });
-        items.push(CommitEvent {
-            actor: "foo".to_string(),
-            repo_id: 2,
-        });
-        items.push(CommitEvent {
-            actor: "bar".to_string(),
-            repo_id: 2,
-        });
-        items.push(CommitEvent {
-            actor: "baz".to_string(),
-            repo_id: 2,
-        });
+        items
+            .entry(CommitEvent {
+                actor: "foo".to_string(),
+                repo_id: 1,
+            })
+            .or_insert(1);
+        items
+            .entry(CommitEvent {
+                actor: "bar".to_string(),
+                repo_id: 1,
+            })
+            .or_insert(1);
 
-        // ensure sorting removes dupes
-        let old_len = items.len();
-        items.sort();
-        items.dedup();
-        assert_eq!(old_len - 1, items.len());
+        items
+            .entry(CommitEvent {
+                actor: "foo".to_string(),
+                repo_id: 2,
+            })
+            .or_insert(1);
+        items
+            .entry(CommitEvent {
+                actor: "bar".to_string(),
+                repo_id: 2,
+            })
+            .or_insert(1);
+
+        items
+            .entry(CommitEvent {
+                actor: "baz".to_string(),
+                repo_id: 2,
+            })
+            .or_insert(1);
 
         // group sql statement works
         let expected_sql = "INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES (1, 'bar'), (2, 'bar'), (2, 'baz'), (1, 'foo'), (2, 'foo') ON CONFLICT DO NOTHING;";

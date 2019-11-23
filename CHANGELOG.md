@@ -4,6 +4,8 @@
 
 (entries go here)
 
+* Switched to a BTreeMap instead of Vec to get automatic deduplication of entries
+
 ### 0.2.0 - 11/15/2019
 
 * Use env vars to switch between modes
