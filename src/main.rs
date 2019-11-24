@@ -210,7 +210,10 @@ fn sinker() {
     };
     match send.send(event_item) {
         Ok(_) => (),
-        Err(e) => info!("Couldn't send 'we're finished' message: {}", e),
+        Err(e) => {
+            info!("Couldn't send 'we're finished' message: {}", e);
+            panic!("Couldn't notify processing thread we're done.");
+        }
     }
 
     // Wait for the worker thread to wrap up.
