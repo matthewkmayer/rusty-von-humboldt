@@ -301,7 +301,7 @@ fn do_repo_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucke
                         "uploaded {} to {}",
                         key_copy, bucket_copy
                     ),
-                    Err(_) => println!("Whoops, couldn't upload {}", key_copy),
+                    Err(e) => panic!("Couldn't upload results: {:?}", e),
                 }
             }
         })
@@ -395,7 +395,7 @@ fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: St
             // This bypasses that issue by creating a new pool every time.
             match client.put_object(upload_request).sync() {
                 Ok(_) => info!("uploaded {} to {}", key_copy, bucket_copy),
-                Err(_) => panic!("TODO FIX ME"),
+                Err(e) => panic!("Couldn't upload results: {:?}", e),
             }
         }
     }
