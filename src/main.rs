@@ -27,7 +27,7 @@ use std::thread;
 use std::time::Instant;
 
 use rusoto_core::Region;
-use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3, DeleteObjectRequest};
+use rusoto_s3::{DeleteObjectRequest, PutObjectRequest, S3Client, StreamingBody, S3};
 use rusty_von_humboldt::*;
 
 const OBFUSCATE_COMMITTER_IDS: bool = true;
@@ -381,7 +381,6 @@ fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: St
         let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
         info!("Compression done.");
 
-
         // Since we're running and uploading from one account and putting into another account's bucket,
         // cross account access requires us to apply the ACL or we'd get a 403 when accessing
         // the destination file from the destination account's S3 bucket.
@@ -454,7 +453,7 @@ fn check_dest_bucket_write_access(bucket_name: &str) {
         ..Default::default()
     };
     match client.put_object(upload_request).sync() {
-        Ok(_) =>info!("We have access to {}", bucket_name),
+        Ok(_) => info!("We have access to {}", bucket_name),
         Err(e) => panic!("No write access to destination bucket: {:?}", e),
     }
     let del_req = DeleteObjectRequest {
@@ -463,8 +462,11 @@ fn check_dest_bucket_write_access(bucket_name: &str) {
         ..Default::default()
     };
     match client.delete_object(del_req).sync() {
-        Ok(_) =>info!("Cleaned up access testing object in S3."),
-        Err(e) => info!("Couldn't clean up the file used to test access to destination bucket: {:?}", e),
+        Ok(_) => info!("Cleaned up access testing object in S3."),
+        Err(e) => info!(
+            "Couldn't clean up the file used to test access to destination bucket: {:?}",
+            e
+        ),
     }
 }
 
@@ -556,7 +558,7 @@ fn group_committer_sql_insert_par(
 ) -> String {
     // Get the repo id and actor names
     let a = committers
-        .into_iter()
+        .iter()
         .map(|commit_event| {
             let actor_name = if obfuscate {
                 let mut sha_er = sha1::Sha1::new();
@@ -573,7 +575,7 @@ fn group_committer_sql_insert_par(
     // EG: instead of `insert into c (a, b) values (foo, bar)` many times, do this:
     // `insert into c (a, b) values (foo, bar), (foo, baz), (foo, baz2)`
     a.chunks(20).map(|c| {
-        let collector = c.iter().map(|x| x.clone()).collect::<Vec<String>>().join(", ");
+        let collector = c.iter().cloned().map(|x| x).collect::<Vec<String>>().join(", ");
         format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", collector)
     })
     .collect::<Vec<String>>()
