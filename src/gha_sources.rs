@@ -187,7 +187,7 @@ fn parse_ze_file_2014_older<R: BufRead>(mut contents: R) -> Result<Vec<Pre2015Ev
     while contents.read_line(&mut line).unwrap() > 0 {
         match serde_json::from_str(&line) {
             Ok(event) => events.push(event),
-            Err(err) => warn!("Found a weird line of json, got this error: {:?}.", err),
+            Err(err) => warn!("Found a weird line of json, got this error: {:?} for line {}.", err, line),
         };
         line.clear();
     }
@@ -202,7 +202,7 @@ fn parse_ze_file_2015_newer<R: BufRead>(mut contents: R) -> Result<Vec<Event>, S
     while contents.read_line(&mut line).unwrap() > 0 {
         match serde_json::from_str(&line) {
             Ok(event) => events.push(event),
-            Err(err) => warn!("Found a weird line of json, got this error: {:?}.", err),
+            Err(err) => warn!("Found a weird line of json, got this error: {:?} for line {}.", err, line),
         };
         line.clear();
     }
