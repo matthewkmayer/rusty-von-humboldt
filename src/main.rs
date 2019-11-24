@@ -27,7 +27,7 @@ use std::thread;
 use std::time::Instant;
 
 use rusoto_core::Region;
-use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
+use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3, DeleteObjectRequest};
 use rusty_von_humboldt::*;
 
 const OBFUSCATE_COMMITTER_IDS: bool = true;
@@ -410,7 +410,7 @@ fn generate_mode_string() -> String {
 
 // check things like dryrun etc
 fn environment_check() {
-    let _ = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
+    let d = env::var("DESTBUCKET").expect("Need DESTBUCKET set to bucket name");
     let _ = env::var("GHABUCKET").expect("Need GHABUCKET set to bucket name");
     let _ = env::var("GHAYEAR").expect("Need GHAYEAR set to year to process");
     let _ = env::var("GHAHOURS")
@@ -421,6 +421,33 @@ fn environment_check() {
     info!("Mode is {:?}", *MODE);
     if MODE.committer_count == MODE.repo_mapping {
         panic!("Please set either commiter count mode or repo mapping mode.");
+    }
+
+    check_dest_bucket_write_access(&d);
+}
+
+fn check_dest_bucket_write_access(bucket_name: &str) {
+    info!("Checking if we have write access to destination bucket");
+    let client = S3Client::new(Region::UsEast1);
+    let filename = "rvh_test_file";
+    let upload_request = PutObjectRequest {
+        bucket: bucket_name.to_string(),
+        key: filename.to_owned(),
+        body: None,
+        ..Default::default()
+    };
+    match client.put_object(upload_request).sync() {
+        Ok(_) =>info!("We have access to {}", bucket_name),
+        Err(e) => panic!("No write access to destination bucket: {:?}", e),
+    }
+    let del_req = DeleteObjectRequest {
+        bucket: bucket_name.to_string(),
+        key: filename.to_owned(),
+        ..Default::default()
+    };
+    match client.delete_object(del_req).sync() {
+        Ok(_) =>info!("Cleaned up access testing object in S3."),
+        Err(e) => info!("Couldn't clean up the file used to test access to destination bucket: {:?}", e),
     }
 }
 
