@@ -278,10 +278,15 @@ fn do_repo_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucke
             let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
             info!("Compression done.");
 
+            // Since we're running and uploading from one account and putting into another account's bucket,
+            // cross account access requires us to apply the ACL or we'd get a 403 when accessing
+            // the destination file from the destination account's S3 bucket.
+            // See https://aws.amazon.com/premiumsupport/knowledge-center/s3-bucket-owner-access/ .
             let upload_request = PutObjectRequest {
                 bucket: dest_bucket.clone(),
                 key: file_name.to_owned(),
                 body: Some(StreamingBody::from(compressed_results)),
+                acl: Some("bucket-owner-full-control".to_string()),
                 ..Default::default()
             };
 
@@ -370,10 +375,16 @@ fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: St
         let compressed_results = encoder.finish().expect("Couldn't compress file, sad.");
         info!("Compression done.");
 
+
+        // Since we're running and uploading from one account and putting into another account's bucket,
+        // cross account access requires us to apply the ACL or we'd get a 403 when accessing
+        // the destination file from the destination account's S3 bucket.
+        // See https://aws.amazon.com/premiumsupport/knowledge-center/s3-bucket-owner-access/ .
         let upload_request = PutObjectRequest {
             bucket: dest_bucket.clone(),
             key: file_name.to_owned(),
             body: Some(StreamingBody::from(compressed_results)),
+            acl: Some("bucket-owner-full-control".to_string()),
             ..Default::default()
         };
 
