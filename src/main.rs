@@ -142,7 +142,12 @@ fn sinker() {
                 if send_a.is_full() {
                     debug!("send_a is full with length of {}", send_a.len());
                 }
-                send_a.send(event_item).expect("Should have sent event.");
+                // Should we retry on send failure? Failures probably only happen if
+                // the other side hangs up or something else we can't do much about.
+                match send_a.send(event_item) {
+                    Ok(_) => (),
+                    Err(e) => info!("Should have sent event, got error {}", e),
+                }
             }
             c += files_to_fetch.len();
             pb.inc(files_to_fetch.len() as u64);
@@ -172,9 +177,12 @@ fn sinker() {
                 if send_b.is_full() {
                     debug!("send_b is full with length of {}", send_b.len());
                 }
-                send_b
-                    .send(event_item)
-                    .expect("Couldn't send event to channel b");
+                // Should we retry on send failure? Failures probably only happen if
+                // the other side hangs up or something else we can't do much about.
+                match send_b.send(event_item) {
+                    Ok(_) => (),
+                    Err(e) => info!("Should have sent event, got error {}", e),
+                }
             }
             c += files_to_fetch.len();
             pb.inc(files_to_fetch.len() as u64);
@@ -200,8 +208,10 @@ fn sinker() {
         event: Event::new(),
         no_more_work: true,
     };
-    send.send(event_item)
-        .expect("Couldn't send stop work item.");
+    match send.send(event_item) {
+        Ok(_) => (),
+        Err(e) => info!("Couldn't send 'we're finished' message: {}", e),
+    }
 
     // Wait for the worker thread to wrap up.
     match thread.join() {
@@ -233,8 +243,9 @@ fn do_repo_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucke
         loop {
             let item: EventWorkItem = match recv.recv() {
                 Ok(i) => i,
-                Err(_) => {
-                    panic!("receiving error");
+                Err(e) => {
+                    error!("receiving error: {}. Moving on.", e);
+                    continue;
                 }
             };
             if repo_mappings.len() % 2_000_000 == 0 {
@@ -312,7 +323,9 @@ fn do_repo_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucke
                         "uploaded {} to {}",
                         key_copy, bucket_copy
                     ),
-                    Err(e) => panic!("Couldn't upload results: {:?}", e),
+                    Err(e) => {
+                        error!("Couldn't upload results in file {}: {:?}", key_copy, e);
+                    }
                 }
             }
         })
@@ -342,8 +355,9 @@ fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: St
         loop {
             let item: EventWorkItem = match recv.recv() {
                 Ok(i) => i,
-                Err(_) => {
-                    panic!("receiving error");
+                Err(e) => {
+                    error!("receiving error: {}. Moving on.", e);
+                    continue;
                 }
             };
 
@@ -411,7 +425,9 @@ fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: St
             // This bypasses that issue by creating a new pool every time.
             match client.put_object(upload_request).sync() {
                 Ok(_) => info!("uploaded {} to {}", key_copy, bucket_copy),
-                Err(e) => panic!("Couldn't upload results: {:?}", e),
+                Err(e) => {
+                    error!("Couldn't upload results to file {}: {:?}", key_copy, e);
+                }
             }
         }
     }
@@ -474,10 +490,27 @@ fn check_dest_bucket_write_access(bucket_name: &str) {
 fn get_event_subset(chunk: &[String], client: &S3Client) -> Vec<Event> {
     chunk
         .par_iter()
-        // todo: don't panic here (issue only when S3 kicks back errors)
-        .flat_map(|file_name| {
-            download_and_parse_file(file_name, &client).expect("Issue with file ingest")
-        })
+        .flat_map(
+            |file_name| match download_and_parse_file(file_name, &client) {
+                Ok(r) => r,
+                Err(e) => {
+                    info!(
+                        "Issue with file download/parse for file {}: {}",
+                        file_name, e
+                    );
+                    match download_and_parse_file(file_name, &client) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            info!(
+                                "Second attempt to download file failed, skipping {} because: {}",
+                                file_name, e
+                            );
+                            Vec::new()
+                        }
+                    }
+                }
+            },
+        )
         .collect()
 }
 
@@ -485,10 +518,27 @@ fn get_event_subset(chunk: &[String], client: &S3Client) -> Vec<Event> {
 fn get_event_subset_committers(chunk: &[String], client: &S3Client) -> Vec<Event> {
     let commit_events: Vec<Event> = chunk
         .par_iter()
-        // todo: don't panic here
-        .flat_map(|file_name| {
-            download_and_parse_file(file_name, &client).expect("Issue with file ingest")
-        })
+        .flat_map(
+            |file_name| match download_and_parse_file(file_name, &client) {
+                Ok(r) => r,
+                Err(e) => {
+                    info!(
+                        "Issue with file download/parse for file {}: {}",
+                        file_name, e
+                    );
+                    match download_and_parse_file(file_name, &client) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            info!(
+                                "Second attempt to download file failed, skipping {} because: {}",
+                                file_name, e
+                            );
+                            Vec::new()
+                        }
+                    }
+                }
+            },
+        )
         .filter(|ref x| x.is_commit_event())
         .collect();
     commit_events
