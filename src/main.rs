@@ -139,6 +139,9 @@ fn sinker() {
                     event,
                     no_more_work: false,
                 };
+                if send_a.is_full() {
+                    debug!("send_a is full with length of {}", send_a.len());
+                }
                 send_a.send(event_item).expect("Should have sent event.");
             }
             c += files_to_fetch.len();
@@ -166,6 +169,9 @@ fn sinker() {
                     event,
                     no_more_work: false,
                 };
+                if send_b.is_full() {
+                    debug!("send_b is full with length of {}", send_b.len());
+                }
                 send_b
                     .send(event_item)
                     .expect("Couldn't send event to channel b");
