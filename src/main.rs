@@ -558,7 +558,7 @@ fn group_committer_sql_insert_par(
 ) -> String {
     // Get the repo id and actor names
     let a = committers
-        .into_iter()
+        .iter()
         .map(|commit_event| {
             let actor_name = if obfuscate {
                 let mut sha_er = sha1::Sha1::new();
@@ -575,7 +575,7 @@ fn group_committer_sql_insert_par(
     // EG: instead of `insert into c (a, b) values (foo, bar)` many times, do this:
     // `insert into c (a, b) values (foo, bar), (foo, baz), (foo, baz2)`
     a.chunks(20).map(|c| {
-        let collector = c.iter().map(|x| x.clone()).collect::<Vec<String>>().join(", ");
+        let collector = c.iter().cloned().map(|x| x).collect::<Vec<String>>().join(", ");
         format!("INSERT INTO committer_repo_id_names (repo_id, actor_name) VALUES {} ON CONFLICT DO NOTHING;", collector)
     })
     .collect::<Vec<String>>()
