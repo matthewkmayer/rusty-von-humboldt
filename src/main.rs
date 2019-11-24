@@ -373,7 +373,8 @@ fn do_work_son(recv: crossbeam_channel::Receiver<EventWorkItem>, dest_bucket: St
                     .entry(item.event.as_commit_event())
                     .or_insert(1);
             }
-            if commiter_events_bt.len() == 20_000_000 {
+            // 20,000,000 was too high for 4 GB of RAM
+            if commiter_events_bt.len() == 1_000_000 {
                 debug!("We got enough work to do!");
                 break;
             }
